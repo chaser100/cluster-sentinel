@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://chaser100.github.io/cluster-sentinel/schemas/clustersentinel-values.schema.json",
+  "title": "Cluster Sentinel Helm chart values",
+  "description": "Configuration schema for the Cluster Sentinel wrapper chart.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "mcpAuth": {
+      "description": "MCP Bearer token Secret configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "manageSecret": {
+          "description": "Create and retain the MCP authentication Secret.",
+          "type": "boolean",
+          "default": true
+        },
+        "existingSecret": {
+          "description": "Name of an externally managed Secret.",
+          "type": "string",
+          "default": ""
+        },
+        "secretName": {
+          "description": "Name of the chart-managed Secret.",
+          "type": "string",
+          "minLength": 1,
+          "default": "clustersentinel-mcp-auth"
+        },
+        "secretKey": {
+          "description": "Secret key containing the Bearer token.",
+          "type": "string",
+          "minLength": 1,
+          "default": "token"
+        }
+      }
+    },
+    "rbac": {
+      "description": "Cluster-wide read-only Kubernetes Events access.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {
+          "description": "Create the ClusterRole and ClusterRoleBinding.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "prometheusRule": {
+      "description": "PrometheusRule configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Create the PrometheusRule resource.",
+          "type": "boolean",
+          "default": false
+        },
+        "labels": {
+          "$ref": "#/definitions/labels"
+        }
+      }
+    },
+    "grafanaDashboard": {
+      "description": "Grafana sidecar dashboard ConfigMap configuration.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Create the Grafana dashboard ConfigMap.",
+          "type": "boolean",
+          "default": true
+        },
+        "labels": {
+          "$ref": "#/definitions/labels"
+        }
+      }
+    },
+    "clustersentinel": {
+      "description": "Values passed to the aliased Universal Helm Chart dependency.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "fullnameOverride": {
+          "type": "string",
+          "default": "clustersentinel"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "default": "chaser420/cluster-sentinel"
+        },
+        "imageTag": {
+          "$ref": "#/definitions/stringOrNumber",
+          "default": "0.9.0"
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ],
+          "default": "IfNotPresent"
+        },
+        "imagePullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "default": []
+        },
+        "service": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "default": "http"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "ClusterIP",
+                "NodePort",
+                "LoadBalancer",
+                "ExternalName"
+              ],
+              "default": "ClusterIP"
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535,
+              "default": 8080
+            },
+            "protocol": {
+              "type": "string",
+              "enum": [
+                "TCP",
+                "UDP",
+                "SCTP"
+              ],
+              "default": "TCP"
+            }
+          }
+        },
+        "route": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "spec": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "readinessProbe": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "livenessProbe": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "serviceAccount": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "create": {
+              "type": "boolean",
+              "default": true
+            },
+            "automount": {
+              "type": "boolean",
+              "default": true
+            },
+            "name": {
+              "type": "string",
+              "default": "clustersentinel"
+            }
+          }
+        },
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": false
+            },
+            "endpoints": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "securityContext": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "podSecurityContext": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "envSecrets": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "$ref": "#/definitions/stringOrNumberOrBoolean"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "stringOrNumber": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "stringOrNumberOrBoolean": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    }
+  }
+}

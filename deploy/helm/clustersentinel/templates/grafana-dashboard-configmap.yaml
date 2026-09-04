@@ -1,0 +1,14 @@
+{{- if .Values.grafanaDashboard.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "clustersentinel.fullname" . }}-grafana-dashboard
+  labels:
+    {{- include "clustersentinel.labels" . | nindent 4 }}
+    {{- with .Values.grafanaDashboard.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+data:
+  clustersentinel.json: |
+    {{- .Files.Get "dashboards/clustersentinel.json" | nindent 4 }}
+{{- end }}

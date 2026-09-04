@@ -1,0 +1,37 @@
+# ClusterSentinel Prometheus alert rules
+groups:
+  - name: clustersentinel
+    rules:
+      - alert: ClusterSentinelWatchErrors
+        expr: increase(clustersentinel_watch_errors_total[15m]) > 5
+        for: 10m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel Kubernetes watch errors elevated
+          description: >-
+            clustersentinel_watch_errors_total increased by {{ $value }} over 15m.
+            Check apiserver RBAC and API connectivity.
+      - alert: ClusterSentinelWatchRestarts
+        expr: increase(clustersentinel_watch_restarts_total[15m]) > 20
+        for: 10m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel watch restarting too frequently
+          description: >-
+            Watch restarted {{ $value }} times in 15m. Investigate stream timeouts
+            and apiserver load.
+      - alert: ClusterSentinelRegistryEmpty
+        expr: clustersentinel_events_registry_size == 0
+        for: 30m
+        labels:
+          severity: info
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel registry has no events
+          description: >-
+            No events retained for 30m. Expected in idle clusters; verify mode
+            is kubernetes (not stuck) if activity is expected.

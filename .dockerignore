@@ -1,0 +1,11 @@
+.git
+.github
+.idea
+.vscode
+deploy
+docs
+observability
+target
+tests
+*.md
+Dockerfile*
