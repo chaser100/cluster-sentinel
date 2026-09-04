@@ -1,0 +1,6 @@
+dependencies:
+- name: application
+  repository: https://chaser100.github.io/u-helm-chart
+  version: 0.3.9
+digest: sha256:d88cae5a163155cc3dc48c41494b0b150014fd4fdaa0b68b8449387e8e9150fb
+generated: "2026-09-04T17:18:38.711413237+03:00"

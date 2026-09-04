@@ -1,0 +1,9 @@
+prometheusRule:
+  enabled: true
+
+grafanaDashboard:
+  enabled: true
+
+clustersentinel:
+  serviceMonitor:
+    enabled: true

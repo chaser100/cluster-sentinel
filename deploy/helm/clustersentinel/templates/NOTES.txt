@@ -1,0 +1,11 @@
+Cluster Sentinel {{ .Chart.AppVersion }} is installed in namespace {{ .Release.Namespace }}.
+
+Check the health endpoint:
+  kubectl --namespace {{ .Release.Namespace }} port-forward service/clustersentinel 8080:8080
+  curl http://127.0.0.1:8080/health
+
+MCP endpoint:
+  http://127.0.0.1:8080/mcp
+
+The MCP endpoint requires the Bearer token stored in Secret/{{ include "clustersentinel.mcpSecretName" . }}.
+Do not print this token in CI logs, issues, or shared terminals.

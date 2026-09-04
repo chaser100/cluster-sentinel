@@ -1,0 +1,945 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "ClusterSentinel event inventory with kubectl-like detail (namespace, type, reason, object, message) plus aggregations.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 100,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Registry size",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "clustersentinel_events_registry_size",
+          "legendFormat": "events",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 4,
+        "y": 1
+      },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Registered (filtered, 1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[1h]))",
+          "legendFormat": "registered",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 9,
+        "y": 1
+      },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "title": "Warnings (filtered, 1h)",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"Warning\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[1h])) or vector(0)",
+          "legendFormat": "warnings",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 14,
+        "y": 1
+      },
+      "id": 4,
+      "title": "Deduped rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(clustersentinel_events_deduped_total[5m]))",
+          "legendFormat": "deduped/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 19,
+        "y": 1
+      },
+      "id": 5,
+      "title": "Watch errors rate",
+      "type": "stat",
+      "targets": [
+        {
+          "expr": "sum(rate(clustersentinel_watch_errors_total[5m]))",
+          "legendFormat": "errors/s",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "id": 102,
+      "panels": [],
+      "title": "Event detail (kubectl-like)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "kubectl-style event detail from ClusterSentinel registry (message truncated to 256 chars in Prometheus labels; full text via /api/v1/events or MCP).",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "LAST SEEN"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeFromNow"
+              },
+              {
+                "id": "custom.width",
+                "value": 110
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "TYPE"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 90
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "REASON"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 160
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "OBJECT"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 280
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "MESSAGE"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 520
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "COUNT"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 80
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 14,
+        "w": 24,
+        "x": 0,
+        "y": 6
+      },
+      "id": 20,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "LAST SEEN"
+          }
+        ],
+        "footer": {
+          "enablePagination": true
+        }
+      },
+      "title": "Recent events (LAST SEEN / TYPE / REASON / OBJECT / MESSAGE)",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "pod": true,
+              "namespace": true,
+              "endpoint": true,
+              "service": true,
+              "container": true
+            },
+            "indexByName": {
+              "Value": 0,
+              "type": 1,
+              "reason": 2,
+              "involved_object": 3,
+              "message": 4,
+              "count": 5,
+              "event_namespace": 6,
+              "source": 7
+            },
+            "renameByName": {
+              "Value": "LAST SEEN",
+              "type": "TYPE",
+              "reason": "REASON",
+              "involved_object": "OBJECT",
+              "message": "MESSAGE",
+              "count": "COUNT",
+              "event_namespace": "NAMESPACE",
+              "source": "SOURCE"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "targets": [
+        {
+          "expr": "clustersentinel_event_last_seen_timestamp{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_object=~\"($involved_kind)/.*\",source=~\"$source\"}",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "id": 101,
+      "panels": [],
+      "title": "Event inventory (sortable tables)",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Sortable breakdown of registered events. Click column headers to sort.",
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Value"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "count_1h"
+              },
+              {
+                "id": "custom.width",
+                "value": 120
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 21
+      },
+      "id": 10,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "count_1h"
+          }
+        ],
+        "footer": {
+          "enablePagination": true
+        }
+      },
+      "title": "Events by namespace / type / reason / kind / source",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true,
+              "__name__": true,
+              "job": true,
+              "instance": true,
+              "pod": true
+            },
+            "indexByName": {
+              "event_namespace": 0,
+              "type": 1,
+              "reason": 2,
+              "involved_kind": 3,
+              "source": 4,
+              "Value": 5
+            },
+            "renameByName": {
+              "event_namespace": "event_namespace",
+              "involved_kind": "kind",
+              "Value": "count_1h"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "targets": [
+        {
+          "expr": "sum by (event_namespace, type, reason, involved_kind, source) (increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[$__range]))",
+          "format": "table",
+          "instant": true,
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 0,
+        "y": 33
+      },
+      "id": 11,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "count_1h"
+          }
+        ]
+      },
+      "title": "Top reasons",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value": "count_1h"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "targets": [
+        {
+          "expr": "topk(20, sum by (reason) (increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[$__range])))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 8,
+        "y": 33
+      },
+      "id": 12,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "count_1h"
+          }
+        ]
+      },
+      "title": "By namespace",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value": "count_1h"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "targets": [
+        {
+          "expr": "topk(20, sum by (event_namespace) (increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[$__range])))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "filterable": true
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 8,
+        "x": 16,
+        "y": 33
+      },
+      "id": 13,
+      "options": {
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "count_1h"
+          }
+        ]
+      },
+      "title": "By involved kind",
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Time": true
+            },
+            "renameByName": {
+              "Value": "count_1h",
+              "involved_kind": "kind"
+            }
+          }
+        }
+      ],
+      "type": "table",
+      "targets": [
+        {
+          "expr": "topk(20, sum by (involved_kind) (increase(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[$__range])))",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 43
+      },
+      "id": 21,
+      "title": "Registered rate by reason (top)",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "topk(10, sum by (reason) (rate(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\",source=~\"$source\"}[5m])))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 51
+      },
+      "id": 22,
+      "title": "Watch restarts / errors",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum(rate(clustersentinel_watch_restarts_total[5m]))",
+          "legendFormat": "restarts/s",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(clustersentinel_watch_errors_total[5m]))",
+          "legendFormat": "errors/s",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 51
+      },
+      "id": 23,
+      "title": "HTTP requests",
+      "type": "timeseries",
+      "targets": [
+        {
+          "expr": "sum by (path, status) (rate(clustersentinel_http_requests_total[5m]))",
+          "legendFormat": "{{path}} {{status}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": [
+    "clustersentinel",
+    "kubernetes",
+    "events",
+    "prod"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "name": "datasource",
+        "query": "prometheus",
+        "type": "datasource"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(clustersentinel_events_registered_total, event_namespace)",
+        "includeAll": true,
+        "multi": true,
+        "name": "event_namespace",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(clustersentinel_events_registered_total, event_namespace)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\"}, type)",
+        "includeAll": true,
+        "multi": true,
+        "name": "event_type",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\"}, type)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\"}, reason)",
+        "includeAll": true,
+        "multi": true,
+        "name": "reason",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\"}, reason)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\"}, involved_kind)",
+        "includeAll": true,
+        "multi": true,
+        "name": "involved_kind",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\"}, involved_kind)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      },
+      {
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\"}, source)",
+        "includeAll": true,
+        "multi": true,
+        "name": "source",
+        "query": {
+          "qryType": 1,
+          "query": "label_values(clustersentinel_events_registered_total{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_kind=~\"$involved_kind\"}, source)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "ClusterSentinel",
+  "uid": "clustersentinel",
+  "version": 3
+}

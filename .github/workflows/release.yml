@@ -1,0 +1,246 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHART_PATH: deploy/helm/clustersentinel
+  IMAGE_NAME: chaser420/cluster-sentinel
+  HELM_REPOSITORY_URL: https://chaser100.github.io/cluster-sentinel
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Verify release tag and versions
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag $RELEASE_TAG is not a supported semantic version"
+            exit 1
+          fi
+
+          chart_version="$(awk '$1 == "version:" { print $2; exit }' "$CHART_PATH/Chart.yaml")"
+          app_version="$(awk '$1 == "appVersion:" { gsub(/"/, "", $2); print $2; exit }' "$CHART_PATH/Chart.yaml")"
+          cargo_version="$(awk '/^\[package\]$/ { package=1; next } /^\[/ { package=0 } package && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
+          image_tag="$(awk '$0 == "clustersentinel:" { dependency=1; next } dependency && /^[^[:space:]]/ { dependency=0 } dependency && $1 == "imageTag:" { gsub(/"/, "", $2); print $2; exit }' "$CHART_PATH/values.yaml")"
+          artifact_image_tag="$(awk '$1 == "image:" && $2 ~ /^chaser420\/cluster-sentinel:/ { split($2, parts, ":"); print parts[2]; exit }' "$CHART_PATH/Chart.yaml")"
+
+          for declared_version in "$chart_version" "$app_version" "$cargo_version" "$image_tag" "$artifact_image_tag"; do
+            if [[ "$declared_version" != "$version" ]]; then
+              echo "::error::Tag $version does not match a declared version: chart=$chart_version app=$app_version cargo=$cargo_version image=$image_tag artifact=$artifact_image_tag"
+              exit 1
+            fi
+          done
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Run Rust checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt --check
+          cargo clippy --all-targets --locked -- -D warnings
+          cargo test --locked
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.18.4
+
+      - name: Validate Helm chart
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm dependency build "$CHART_PATH"
+          helm lint "$CHART_PATH" --strict
+          helm lint "$CHART_PATH" --strict --values "$CHART_PATH/tests/values-observability.yaml"
+          helm template clustersentinel "$CHART_PATH" --namespace clustersentinel >/dev/null
+          helm template clustersentinel "$CHART_PATH" \
+            --namespace clustersentinel \
+            --values "$CHART_PATH/tests/values-observability.yaml" >/dev/null
+
+  publish-image:
+    name: Publish Docker image
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build and push image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.validate.outputs.version }}
+            ${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            BUILD_VERSION=${{ needs.validate.outputs.version }}
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+  publish-chart:
+    name: Publish Helm chart
+    needs: validate
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.18.4
+
+      - name: Package chart
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          helm dependency build "$CHART_PATH"
+          helm package "$CHART_PATH" --destination dist
+          sha256sum "dist/clustersentinel-${{ needs.validate.outputs.version }}.tgz" \
+            > "dist/clustersentinel-${{ needs.validate.outputs.version }}.tgz.sha256"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist/clustersentinel-$VERSION.tgz" \
+              "dist/clustersentinel-$VERSION.tgz.sha256" \
+              --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              "dist/clustersentinel-$VERSION.tgz" \
+              "dist/clustersentinel-$VERSION.tgz.sha256" \
+              --verify-tag \
+              --title "Cluster Sentinel $VERSION" \
+              --generate-notes
+          fi
+
+  build-pages:
+    name: Build Helm repository
+    needs:
+      - validate
+      - publish-image
+      - publish-chart
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.18.4
+
+      - name: Download all chart packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp docs/.nojekyll docs/artifacthub-repo.yml docs/index.html site/
+
+          while IFS= read -r release_tag; do
+            gh release download "$release_tag" \
+              --pattern "clustersentinel-*.tgz" \
+              --dir site \
+              --clobber || true
+          done < <(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+
+          test -f "site/clustersentinel-${{ needs.validate.outputs.version }}.tgz"
+          helm repo index site --url "$HELM_REPOSITORY_URL"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+
+  deploy-pages:
+    name: Deploy Helm repository
+    needs: build-pages
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+

@@ -1,0 +1,125 @@
+# -- MCP Bearer Secret settings. The generated token is reused on Helm upgrades through lookup.
+mcpAuth:
+  # -- Create and retain the MCP authentication Secret.
+  manageSecret: true
+  # -- Use an existing Secret instead of creating one. Also update clustersentinel.envSecrets when the name differs.
+  existingSecret: ""
+  # -- Secret name used by the default deployment values.
+  secretName: clustersentinel-mcp-auth
+  # -- Key that stores the Bearer token.
+  secretKey: token
+
+# -- Cluster-wide read-only permissions required to watch Kubernetes Events.
+rbac:
+  # -- Create the ClusterRole and ClusterRoleBinding.
+  create: true
+
+# -- PrometheusRule shipped with Cluster Sentinel. Requires the Prometheus Operator CRDs.
+prometheusRule:
+  # -- Create the PrometheusRule.
+  enabled: false
+  # -- Extra labels used by the Prometheus Operator rule selector.
+  labels:
+    release: kube-prometheus-stack
+
+# -- Grafana sidecar dashboard ConfigMap.
+grafanaDashboard:
+  # -- Create the dashboard ConfigMap.
+  enabled: true
+  # -- Labels used by the Grafana dashboard sidecar.
+  labels:
+    grafana_dashboard: "1"
+
+# Values for the aliased Universal Helm Chart dependency.
+clustersentinel:
+  fullnameOverride: clustersentinel
+  replicaCount: 1
+
+  image: chaser420/cluster-sentinel
+  imageTag: "0.9.0"
+  imagePullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  service:
+    name: http
+    type: ClusterIP
+    port: 8080
+    protocol: TCP
+
+  route:
+    enabled: false
+
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 6
+
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 15
+    periodSeconds: 20
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  serviceAccount:
+    create: true
+    automount: true
+    name: clustersentinel
+
+  serviceMonitor:
+    enabled: false
+    endpoints:
+      - port: http
+        path: /metrics
+        interval: 30s
+        scrapeTimeout: 10s
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 65532
+
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+
+  envSecrets:
+    enableEnv: true
+    envs:
+      - name: CLUSTERSENTINEL_MCP_AUTH_TOKEN
+        secretName: clustersentinel-mcp-auth
+        secretKey: token
+
+  env:
+    - name: CLUSTERSENTINEL_EVENTS_MODE
+      value: kubernetes
+    - name: CLUSTERSENTINEL_WATCH_TIMEOUT_SECS
+      value: "290"
+    - name: CLUSTERSENTINEL_REGISTRY_CAPACITY
+      value: "10000"
+    - name: CLUSTERSENTINEL_DEDUP_TTL_SECS
+      value: "3600"
+    - name: CLUSTERSENTINEL_WATCH_BACKOFF_SECS
+      value: "5"
+    - name: CLUSTERSENTINEL_WATCH_BACKOFF_MAX_SECS
+      value: "60"
+    - name: RUST_LOG
+      value: info

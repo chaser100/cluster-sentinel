@@ -1,0 +1,12 @@
+/target/
+/deploy/helm/clustersentinel/charts/
+**/*.rs.bk
+.idea/
+.vscode/
+*.swp
+.env
+.env.*
+!.env.example
+.tempotoken
+Cargo.lock.bak
+.DS_Store
