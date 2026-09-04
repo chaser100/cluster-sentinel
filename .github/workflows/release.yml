@@ -77,6 +77,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
           helm dependency build "$CHART_PATH"
           helm lint "$CHART_PATH" --strict
           helm lint "$CHART_PATH" --strict --values "$CHART_PATH/tests/values-observability.yaml"
@@ -151,6 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
           helm dependency build "$CHART_PATH"
           helm package "$CHART_PATH" --destination dist
           sha256sum "dist/clustersentinel-${{ needs.validate.outputs.version }}.tgz" \
@@ -243,4 +245,3 @@ jobs:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
-

@@ -75,6 +75,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
           helm dependency build "$CHART_PATH"
           helm lint "$CHART_PATH" --strict
           helm lint "$CHART_PATH" --strict --values "$CHART_PATH/tests/values-observability.yaml"

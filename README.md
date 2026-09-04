@@ -236,6 +236,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test --locked
 
+helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
 helm dependency build deploy/helm/clustersentinel
 helm lint deploy/helm/clustersentinel --strict
 helm template clustersentinel deploy/helm/clustersentinel \
