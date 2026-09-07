@@ -1,0 +1,58 @@
+{{- $fullName := include "application.fullname" . -}}
+{{- $namespace := .Release.Namespace -}}
+
+{{- if .Values.ingress.enabled }}
+1. 🌐 Access your application via Ingress:
+{{- range $host := .Values.ingress.hosts }}
+  {{- range $path := $host.paths }}
+  - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ $path.path }}
+  {{- end }}
+{{- end }}
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+1. 🌐 Access your application via LoadBalancer:
+   NOTE: It may take a few minutes for the LoadBalancer IP to become available.
+   Watch status:
+     kubectl get svc --namespace {{ $namespace }} -w {{ $fullName }}
+
+   Once ready, run:
+     export SERVICE_IP=$(kubectl get svc --namespace {{ $namespace }} {{ $fullName }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+     echo "http://$SERVICE_IP:{{ .Values.service.port }}"
+
+{{- else if contains "NodePort" .Values.service.type }}
+1. 🌐 Access your application via NodePort:
+     export NODE_PORT=$(kubectl get svc --namespace {{ $namespace }} {{ $fullName }} -o jsonpath='{.spec.ports[0].nodePort}')
+     export NODE_IP=$(kubectl get nodes --namespace {{ $namespace }} -o jsonpath='{.items[0].status.addresses[0].address}')
+     echo "http://$NODE_IP:$NODE_PORT"
+
+{{- else if contains "ClusterIP" .Values.service.type }}
+1. ⚙️ Access your application locally via port-forward:
+     POD_NAME=$(kubectl get pods --namespace {{ $namespace }} -l "app.kubernetes.io/name={{ include "application.name" . }},app.kubernetes.io/instance={{ .Release.Name }}" -o jsonpath="{.items[0].metadata.name}")
+     kubectl --namespace {{ $namespace }} port-forward $POD_NAME 8080:{{ .Values.service.port }}
+     echo "http://localhost:8080"
+{{- end }}
+
+{{- if .Values.job.enabled }}
+2. ⚙️ Run the Job manually (if it hasn’t already):
+     kubectl get jobs -n {{ $namespace }} | grep {{ $fullName }}-job
+
+   Re-run manually:
+     kubectl delete job/{{ $fullName }}-job -n {{ $namespace }} --ignore-not-found
+     helm upgrade --install {{ .Release.Name }} . -n {{ $namespace }} --set job.enabled=true
+{{- end }}
+
+{{- if .Values.cronjob.enabled }}
+3. ⏱ CronJob is enabled and scheduled as:
+     Schedule: {{ .Values.cronjob.schedule }}
+
+   Check upcoming executions:
+     kubectl get cronjob {{ $fullName }}-cron -n {{ $namespace }}
+
+   See past jobs:
+     kubectl get jobs -n {{ $namespace }} --selector=job-name~={{ $fullName }}-cron
+{{- end }}
+
+4. ℹ️ General Info:
+   - Namespace: {{ $namespace }}
+   - Release: {{ .Release.Name }}
+   - Chart Version: {{ .Chart.Version }}

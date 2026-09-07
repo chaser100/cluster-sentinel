@@ -1,0 +1,148 @@
+{{- range .Values.persistentVolumeClaims }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "application.labels" $ | nindent 4 }}
+  {{- with .annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .accessModes }}
+  accessModes:
+    {{- range .accessModes }}
+    - {{ . }}
+    {{- end }}
+  {{- else }}
+  accessModes:
+    - ReadWriteOnce
+  {{- end }}
+  {{- if .storageClassName }}
+  storageClassName: {{ .storageClassName }}
+  {{- end }}
+  {{- if .resources }}
+  resources:
+    {{- toYaml .resources | nindent 4 }}
+  {{- else }}
+  resources:
+    requests:
+      storage: {{ .size | default "1Gi" }}
+  {{- end }}
+  {{- if .volumeMode }}
+  volumeMode: {{ .volumeMode }}
+  {{- end }}
+  {{- if .dataSource }}
+  dataSource:
+    {{- toYaml .dataSource | nindent 4 }}
+  {{- end }}
+  {{- if .selector }}
+  selector:
+    {{- toYaml .selector | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- with .Values.initContainers }}
+{{- if and .enabled .containers }}
+{{- range .containers }}
+{{- if and .pvc (default false .pvc.enabled) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .pvc.name | default (printf "%s-pvc" .name) }}
+  labels:
+    {{- include "application.labels" $ | nindent 4 }}
+  {{- with .pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .pvc.accessModes }}
+  accessModes:
+    {{- range .pvc.accessModes }}
+    - {{ . }}
+    {{- end }}
+  {{- else }}
+  accessModes:
+    - ReadWriteOnce
+  {{- end }}
+  {{- if .pvc.storageClassName }}
+  storageClassName: {{ .pvc.storageClassName }}
+  {{- end }}
+  {{- if .pvc.resources }}
+  resources:
+    {{- toYaml .pvc.resources | nindent 4 }}
+  {{- else }}
+  resources:
+    requests:
+      storage: {{ .pvc.size | default "1Gi" }}
+  {{- end }}
+  {{- if .pvc.volumeMode }}
+  volumeMode: {{ .pvc.volumeMode }}
+  {{- end }}
+  {{- if .pvc.dataSource }}
+  dataSource:
+    {{- toYaml .pvc.dataSource | nindent 4 }}
+  {{- end }}
+  {{- if .pvc.selector }}
+  selector:
+    {{- toYaml .pvc.selector | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- with .Values.extraContainers }}
+{{- if and .enabled .containers }}
+{{- range .containers }}
+{{- if and .pvc (default false .pvc.enabled) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .pvc.name | default (printf "%s-pvc" .name) }}
+  labels:
+    {{- include "application.labels" $ | nindent 4 }}
+  {{- with .pvc.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .pvc.accessModes }}
+  accessModes:
+    {{- range .pvc.accessModes }}
+    - {{ . }}
+    {{- end }}
+  {{- else }}
+  accessModes:
+    - ReadWriteOnce
+  {{- end }}
+  {{- if .pvc.storageClassName }}
+  storageClassName: {{ .pvc.storageClassName }}
+  {{- end }}
+  {{- if .pvc.resources }}
+  resources:
+    {{- toYaml .pvc.resources | nindent 4 }}
+  {{- else }}
+  resources:
+    requests:
+      storage: {{ .pvc.size | default "1Gi" }}
+  {{- end }}
+  {{- if .pvc.volumeMode }}
+  volumeMode: {{ .pvc.volumeMode }}
+  {{- end }}
+  {{- if .pvc.dataSource }}
+  dataSource:
+    {{- toYaml .pvc.dataSource | nindent 4 }}
+  {{- end }}
+  {{- if .pvc.selector }}
+  selector:
+    {{- toYaml .pvc.selector | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+

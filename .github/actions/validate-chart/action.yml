@@ -1,0 +1,73 @@
+name: Validate packaged Helm chart
+description: Package and render the vendored chart with an empty Helm configuration.
+inputs:
+  chart-path:
+    description: Path to the chart directory.
+    required: true
+outputs:
+  package-path:
+    description: Absolute path to the validated chart archive.
+    value: ${{ steps.validate.outputs.package-path }}
+runs:
+  using: composite
+  steps:
+    - name: Validate source and packaged chart
+      id: validate
+      shell: bash
+      env:
+        CHART_PATH: ${{ inputs.chart-path }}
+      run: |
+        set -euo pipefail
+        CHART_PATH="$(realpath "$CHART_PATH")"
+        validation_dir="$(mktemp -d)"
+        export HELM_CONFIG_HOME="$validation_dir/config"
+        export HELM_CACHE_HOME="$validation_dir/cache"
+        export HELM_DATA_HOME="$validation_dir/data"
+        export HELM_PLUGINS="$validation_dir/plugins"
+
+        chart_version="$(awk '$1 == "version:" { print $2; exit }' "$CHART_PATH/Chart.yaml")"
+        dependency_chart="$CHART_PATH/charts/application/Chart.yaml"
+        test -f "$dependency_chart"
+        test "$(awk '/^name:/ { print $2; exit }' "$dependency_chart")" = application
+        dependency_version="$(awk '/^version:/ { print $2; exit }' "$dependency_chart")"
+        test "$(awk '$1 == "version:" { print $2; exit }' "$CHART_PATH/Chart.lock")" = "$dependency_version"
+        helm dependency list "$CHART_PATH" > "$validation_dir/dependencies.txt"
+        cat "$validation_dir/dependencies.txt"
+        awk -v version="$dependency_version" 'NR == 2 { valid=($1 == "application" && $2 == version && $NF == "unpacked") } END { exit !valid }' "$validation_dir/dependencies.txt"
+        shopt -s nullglob
+        dependency_archives=("$CHART_PATH/charts/"*.tgz)
+        test "${#dependency_archives[@]}" -eq 0
+
+        jq empty "$CHART_PATH/values.schema.json" "$CHART_PATH/dashboards/clustersentinel.json"
+        cmp observability/alerts/clustersentinel.yaml "$CHART_PATH/alerts/clustersentinel.yaml"
+        cmp observability/dashboards/clustersentinel.json "$CHART_PATH/dashboards/clustersentinel.json"
+        helm lint "$CHART_PATH" --strict
+        for values_file in "$CHART_PATH"/tests/values-*.yaml; do
+          helm lint "$CHART_PATH" --strict --values "$values_file"
+        done
+
+        helm package "$CHART_PATH" --destination "$validation_dir"
+        package_path="$validation_dir/clustersentinel-$chart_version.tgz"
+        mkdir "$validation_dir/unpacked"
+        tar -xzf "$package_path" --directory "$validation_dir/unpacked"
+        packaged_chart="$validation_dir/unpacked/clustersentinel"
+        test -f "$packaged_chart/values.schema.json"
+        test -f "$packaged_chart/charts/application/values.schema.json"
+        test "$(awk '/^name:/ { print $2; exit }' "$packaged_chart/charts/application/Chart.yaml")" = application
+        test "$(awk '/^version:/ { print $2; exit }' "$packaged_chart/charts/application/Chart.yaml")" = "$dependency_version"
+        helm template clustersentinel "$package_path" --namespace clustersentinel > "$validation_dir/default.yaml"
+        for values_file in "$CHART_PATH"/tests/values-*.yaml; do
+          helm template clustersentinel "$package_path" --namespace clustersentinel \
+            --values "$values_file" > "$validation_dir/$(basename "$values_file")"
+        done
+        if grep -q '^kind: Secret$' "$validation_dir/values-existing-secret.yaml"; then
+          echo '::error::Existing Secret configuration must not generate a Secret'
+          exit 1
+        fi
+        grep -q 'name: clustersentinel-external-auth' "$validation_dir/values-existing-secret.yaml"
+        if helm template invalid "$package_path" --set-string rbac.create=true > "$validation_dir/invalid.log" 2>&1; then
+          echo '::error::The packaged values schema accepted an invalid boolean'
+          exit 1
+        fi
+        grep -q 'rbac.create' "$validation_dir/invalid.log"
+        echo "package-path=$package_path" >> "$GITHUB_OUTPUT"

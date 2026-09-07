@@ -5,6 +5,8 @@ on:
     branches:
       - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -16,18 +18,21 @@ concurrency:
 
 env:
   CHART_PATH: deploy/helm/clustersentinel
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   validate:
     name: Rust, Helm, and image checks
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify synchronized release version
         env:
@@ -41,10 +46,12 @@ jobs:
           cargo_version="$(awk '/^\[package\]$/ { package=1; next } /^\[/ { package=0 } package && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
           image_tag="$(awk '$0 == "clustersentinel:" { dependency=1; next } dependency && /^[^[:space:]]/ { dependency=0 } dependency && $1 == "imageTag:" { gsub(/"/, "", $2); print $2; exit }' "$CHART_PATH/values.yaml")"
           artifact_image_tag="$(awk '$1 == "image:" && $2 ~ /^chaser420\/cluster-sentinel:/ { split($2, parts, ":"); print parts[2]; exit }' "$CHART_PATH/Chart.yaml")"
+          schema_image_tag="$(jq -r '.properties.clustersentinel.properties.imageTag.default' "$CHART_PATH/values.schema.json")"
+          cargo_lock_version="$(awk '/^name = "clustersentinel"$/ { package=1; next } /^\[\[/ { package=0 } package && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.lock)"
 
-          for version in "$app_version" "$cargo_version" "$image_tag" "$artifact_image_tag"; do
+          for version in "$app_version" "$cargo_version" "$cargo_lock_version" "$image_tag" "$artifact_image_tag" "$schema_image_tag"; do
             if [[ "$version" != "$chart_version" ]]; then
-              echo "::error::Release versions are not synchronized: chart=$chart_version app=$app_version cargo=$cargo_version image=$image_tag artifact=$artifact_image_tag"
+              echo "::error::Release versions are not synchronized: chart=$chart_version app=$app_version cargo=$cargo_version lock=$cargo_lock_version image=$image_tag artifact=$artifact_image_tag schema=$schema_image_tag"
               exit 1
             fi
           done
@@ -72,25 +79,19 @@ jobs:
           version: v3.18.4
 
       - name: Validate Helm chart
-        shell: bash
-        run: |
-          set -euo pipefail
-          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
-          helm dependency build "$CHART_PATH"
-          helm lint "$CHART_PATH" --strict
-          helm lint "$CHART_PATH" --strict --values "$CHART_PATH/tests/values-observability.yaml"
-          helm template clustersentinel "$CHART_PATH" --namespace clustersentinel >/dev/null
-          helm template clustersentinel "$CHART_PATH" \
-            --namespace clustersentinel \
-            --values "$CHART_PATH/tests/values-observability.yaml" >/dev/null
+        uses: ./.github/actions/validate-chart
+        with:
+          chart-path: ${{ env.CHART_PATH }}
 
-      - name: Validate observability artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          jq empty observability/dashboards/clustersentinel.json
-          cmp observability/alerts/clustersentinel.yaml "$CHART_PATH/alerts/clustersentinel.yaml"
-          cmp observability/dashboards/clustersentinel.json "$CHART_PATH/dashboards/clustersentinel.json"
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          buildkitd-config: .github/buildkitd.toml
+          driver-opts: |
+            memory=1536m
+            memory-swap=1536m
+            cpu-period=100000
+            cpu-quota=200000
 
       - name: Build container image
         env:
@@ -98,7 +99,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          docker build \
+          docker buildx build --load --platform linux/amd64 \
+            --build-arg CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS" \
             --build-arg BUILD_VERSION="$IMAGE_TAG" \
             --build-arg VCS_REF="$GITHUB_SHA" \
             --tag "cluster-sentinel:$IMAGE_TAG" \

@@ -1,0 +1,432 @@
+{{- if not (default false .Values.deploymentDisable) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "application.fullname" . }}
+  labels:
+    {{- include "application.labels" . | nindent 4 }}
+  {{- with .Values.deploymentAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.deploymentStrategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "application.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "application.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "application.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.shareProcessNamespace }}
+      shareProcessNamespace: {{ .Values.shareProcessNamespace }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      {{- if and .enabled .containers }}
+      initContainers:
+        {{- range .containers }}
+        - name: {{ .name }}
+          image: {{ .image }}:{{ default $.Values.imageTag .imageTag }}
+          {{- if .imagePullPolicy }}
+          imagePullPolicy: {{ .imagePullPolicy }}
+          {{- else }}
+          imagePullPolicy: {{ $.Values.imagePullPolicy | default "Always" }}
+          {{- end }}
+          {{- if .command }}
+          command:
+            {{- toYaml .command | nindent 12 }}
+          {{- end }}
+          {{- if .args }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          {{- end }}
+          {{- if .securityContext }}
+          securityContext:
+            {{- toYaml .securityContext | nindent 12 }}
+          {{- end }}
+          {{- $initEnvVars := list }}
+          {{- if .env }}
+            {{- range .env }}
+              {{- $initEnvVars = append $initEnvVars . }}
+            {{- end }}
+          {{- end }}
+          {{- if $.Values.env }}
+            {{- range $.Values.env }}
+              {{- $initEnvVars = append $initEnvVars . }}
+            {{- end }}
+          {{- end }}
+          {{- if and $.Values.envSecrets $.Values.envSecrets.enableEnv }}
+            {{- range $.Values.envSecrets.envs }}
+              {{- $initEnvVars = append $initEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+            {{- end }}
+          {{- end }}
+          {{- if .envFromSecrets }}
+            {{- range .envFromSecrets }}
+              {{- $initEnvVars = append $initEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+            {{- end }}
+          {{- end }}
+          {{- if $initEnvVars }}
+          env:
+            {{- range $initEnvVars }}
+            - name: {{ .name }}
+              {{- if .value }}
+              value: {{ .value | quote }}
+              {{- else if .valueFrom }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- $initEnvFromList := list }}
+          {{- if and $.Values.envFromSecrets $.Values.envFromSecrets.enableEnvFrom }}
+            {{- $initEnvFromList = append $initEnvFromList (dict "secretRef" (dict "name" $.Values.envFromSecrets.secretName)) }}
+          {{- end }}
+          {{- if .envFrom }}
+            {{- range .envFrom }}
+              {{- $initEnvFromList = append $initEnvFromList . }}
+            {{- end }}
+          {{- end }}
+          {{- if $initEnvFromList }}
+          envFrom:
+            {{- range $initEnvFromList }}
+            - {{- toYaml . | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          {{- $initMounts := list }}
+          {{- if .volumeMounts }}
+            {{- range .volumeMounts }}
+              {{- $initMounts = append $initMounts . }}
+            {{- end }}
+          {{- end }}
+          {{- if and .pvc (default false .pvc.enabled) }}
+            {{- $pvcName := .pvc.name | default (printf "%s-pvc" .name) }}
+            {{- $initMounts = append $initMounts (dict "name" $pvcName "mountPath" (.pvc.mountPath | default "/data") "subPath" .pvc.subPath "readOnly" (default false .pvc.readOnly)) }}
+          {{- end }}
+          {{- if $initMounts }}
+          volumeMounts:
+            {{- range $initMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{- if .subPath }}
+              subPath: {{ .subPath }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if .resources }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      containers:
+        - name: {{ .Values.containerName | default .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: {{ .Values.image }}:{{ .Values.imageTag }}
+          imagePullPolicy: {{ .Values.imagePullPolicy | default "Always" }}
+          {{- if .Values.command }}
+          command:
+            {{- toYaml .Values.command | nindent 12 }}
+          {{- end }}
+          {{- $envVars := list }}
+          {{- if .Values.env }}
+          {{- range .Values.env }}
+            {{- $envVars = append $envVars . }}
+          {{- end }}
+          {{- end }}
+          {{- if and .Values.envSecrets .Values.envSecrets.enableEnv }}
+            {{- range .Values.envSecrets.envs }}
+              {{- $envVars = append $envVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+            {{- end }}
+          {{- end }}
+          {{- if $envVars }}
+          env:
+            {{- range $envVars }}
+            - name: {{ .name }}
+              {{- if .value }}
+              value: {{ .value | quote }}
+              {{- else if .valueFrom }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- $mainEnvFromList := list }}
+          {{- if and .Values.envFromSecrets .Values.envFromSecrets.enableEnvFrom }}
+            {{- $mainEnvFromList = append $mainEnvFromList (dict "secretRef" (dict "name" .Values.envFromSecrets.secretName)) }}
+          {{- end }}
+          {{- if .Values.envFrom }}
+            {{- range .Values.envFrom }}
+              {{- $mainEnvFromList = append $mainEnvFromList . }}
+            {{- end }}
+          {{- end }}
+          {{- if $mainEnvFromList }}
+          envFrom:
+            {{- range $mainEnvFromList }}
+            - {{- toYaml . | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: {{ .Values.service.name }}
+              containerPort: {{ .Values.service.port }}
+              protocol: {{ .Values.service.protocol }}
+          {{- if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | trim | nindent 12 }}
+          {{- end }}
+          {{- if .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml .Values.startupProbe | trim | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | trim | nindent 12 }}
+          {{- end }}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | trim | nindent 12 }}
+          {{- end }}
+          {{- with .Values.lifecycle }}
+          lifecycle:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $mounts := list }}
+          {{- range .Values.volumeMounts }}
+            {{- $mounts = append $mounts . }}
+          {{- end }}
+          {{- range .Values.configMaps }}
+            {{- if .mountPath }}
+              {{- $mounts = append $mounts (dict "name" .name "mountPath" .mountPath "subPath" .subPath "readOnly" (default true .readOnly)) }}
+            {{- end }}
+          {{- end }}
+          {{- range .Values.persistentVolumeClaims }}
+            {{- if .mountPath }}
+              {{- $mounts = append $mounts (dict "name" .name "mountPath" .mountPath "subPath" .subPath "readOnly" (default false .readOnly)) }}
+            {{- end }}
+          {{- end }}
+          {{- if $mounts }}
+          volumeMounts:
+            {{- range $mount := $mounts }}
+            - name: {{ $mount.name }}
+              mountPath: {{ $mount.mountPath }}
+              {{- if $mount.subPath }}
+              subPath: {{ $mount.subPath }}
+              {{- end }}
+              readOnly: {{ $mount.readOnly }}
+            {{- end }}
+          {{- end }}
+      {{- with .Values.extraContainers }}
+      {{- if and .enabled .containers }}
+      {{- range .containers }}
+        - name: {{ .name }}
+          image: {{ .image }}:{{ default $.Values.imageTag .imageTag }}
+          {{- if .imagePullPolicy }}
+          imagePullPolicy: {{ .imagePullPolicy }}
+          {{- end }}
+          {{- if .command }}
+          command:
+            {{- toYaml .command | nindent 12 }}
+          {{- end }}
+          {{- if .args }}
+          args:
+            {{- toYaml .args | nindent 12 }}
+          {{- end }}
+          {{- if .securityContext }}
+          securityContext:
+            {{- toYaml .securityContext | nindent 12 }}
+          {{- end }}
+          {{- if .ports }}
+          ports:
+            {{- toYaml .ports | nindent 12 }}
+          {{- end }}
+          {{- if .resources }}
+          resources:
+            {{- toYaml .resources | nindent 12 }}
+          {{- end }}
+          {{- if .startupProbe }}
+          startupProbe:
+            {{- toYaml .startupProbe | nindent 12 }}
+          {{- end }}
+          {{- if .readinessProbe }}
+          readinessProbe:
+            {{- toYaml .readinessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .livenessProbe }}
+          livenessProbe:
+            {{- toYaml .livenessProbe | nindent 12 }}
+          {{- end }}
+          {{- $sidecarEnvVars := list }}
+          {{- if .env }}
+            {{- range .env }}
+              {{- $sidecarEnvVars = append $sidecarEnvVars . }}
+            {{- end }}
+          {{- end }}
+          {{- if $.Values.env }}
+            {{- range $.Values.env }}
+              {{- $sidecarEnvVars = append $sidecarEnvVars . }}
+            {{- end }}
+          {{- end }}
+          {{- if and $.Values.envSecrets $.Values.envSecrets.enableEnv }}
+            {{- range $.Values.envSecrets.envs }}
+              {{- $sidecarEnvVars = append $sidecarEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+            {{- end }}
+          {{- end }}
+          {{- if .envFromSecrets }}
+            {{- range .envFromSecrets }}
+              {{- $sidecarEnvVars = append $sidecarEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+            {{- end }}
+          {{- end }}
+          {{- if $sidecarEnvVars }}
+          env:
+            {{- range $sidecarEnvVars }}
+            - name: {{ .name }}
+              {{- if .value }}
+              value: {{ .value | quote }}
+              {{- else if .valueFrom }}
+              valueFrom:
+                {{- toYaml .valueFrom | nindent 16 }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- $envFromList := list }}
+          {{- if and $.Values.envFromSecrets $.Values.envFromSecrets.enableEnvFrom }}
+            {{- $envFromList = append $envFromList (dict "secretRef" (dict "name" $.Values.envFromSecrets.secretName)) }}
+          {{- end }}
+          {{- if .envFrom }}
+            {{- range .envFrom }}
+              {{- $envFromList = append $envFromList . }}
+            {{- end }}
+          {{- end }}
+          {{- if $envFromList }}
+          envFrom:
+            {{- range $envFromList }}
+            - {{- toYaml . | nindent 14 }}
+            {{- end }}
+          {{- end }}
+          {{- $sidecarMounts := list }}
+          {{- if .volumeMounts }}
+            {{- range .volumeMounts }}
+              {{- $sidecarMounts = append $sidecarMounts . }}
+            {{- end }}
+          {{- end }}
+          {{- if and .pvc (default false .pvc.enabled) }}
+            {{- $pvcName := .pvc.name | default (printf "%s-pvc" .name) }}
+            {{- $sidecarMounts = append $sidecarMounts (dict "name" $pvcName "mountPath" (.pvc.mountPath | default "/data") "subPath" .pvc.subPath "readOnly" (default false .pvc.readOnly)) }}
+          {{- end }}
+          {{- if $sidecarMounts }}
+          volumeMounts:
+            {{- range $sidecarMounts }}
+            - name: {{ .name }}
+              mountPath: {{ .mountPath }}
+              {{- if .subPath }}
+              subPath: {{ .subPath }}
+              {{- end }}
+              {{- if .readOnly }}
+              readOnly: {{ .readOnly }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- $vols := list }}
+      {{- range .Values.volumes }}
+        {{- $vols = append $vols . }}
+      {{- end }}
+      {{- range .Values.configMaps }}
+        {{- if .mountPath }}
+          {{- $vols = append $vols (dict "name" .name "configMap" (dict "name" .name "items" .items "defaultMode" .defaultMode)) }}
+        {{- end }}
+      {{- end }}
+      {{- range .Values.persistentVolumeClaims }}
+        {{- if .mountPath }}
+          {{- $vols = append $vols (dict "name" .name "persistentVolumeClaim" (dict "claimName" .name)) }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      {{- if and .enabled .containers }}
+      {{- range .containers }}
+      {{- if and .pvc (default false .pvc.enabled) }}
+        {{- $pvcName := .pvc.name | default (printf "%s-pvc" .name) }}
+        {{- $vols = append $vols (dict "name" $pvcName "persistentVolumeClaim" (dict "claimName" $pvcName)) }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.extraContainers }}
+      {{- if and .enabled .containers }}
+      {{- range .containers }}
+      {{- if and .pvc (default false .pvc.enabled) }}
+        {{- $pvcName := .pvc.name | default (printf "%s-pvc" .name) }}
+        {{- $vols = append $vols (dict "name" $pvcName "persistentVolumeClaim" (dict "claimName" $pvcName)) }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if $vols }}
+      volumes:
+        {{- range $vol := $vols }}
+        - name: {{ $vol.name }}
+          {{- if $vol.secret }}
+          secret:
+            {{- toYaml $vol.secret | nindent 12 }}
+          {{- else if $vol.configMap }}
+          configMap:
+            name: {{ $vol.configMap.name }}
+            {{- if $vol.configMap.items }}
+            items:
+              {{- toYaml $vol.configMap.items | nindent 14 }}
+            {{- end }}
+            {{- if $vol.configMap.defaultMode }}
+            defaultMode: {{ $vol.configMap.defaultMode }}
+            {{- end }}
+          {{- else if $vol.persistentVolumeClaim }}
+          persistentVolumeClaim:
+            claimName: {{ $vol.persistentVolumeClaim.claimName }}
+          {{- else if $vol.hostPath }}
+          hostPath:
+            {{- toYaml $vol.hostPath | nindent 12 }}
+          {{- else if $vol.emptyDir }}
+          emptyDir:
+            {{- toYaml $vol.emptyDir | nindent 12 }}
+          {{- end }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

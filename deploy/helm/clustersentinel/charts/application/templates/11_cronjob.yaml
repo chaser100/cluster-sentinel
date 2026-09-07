@@ -1,0 +1,126 @@
+{{- if .Values.cronjob.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "application.fullname" . }}-cron
+  labels:
+    {{- include "application.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.cronjob.schedule | quote }}
+  successfulJobsHistoryLimit: {{ .Values.cronjob.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.cronjob.failedJobsHistoryLimit | default 1 }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.cronjob.backoffLimit | default 1 }}
+      template:
+        metadata:
+          labels:
+            {{- include "application.labels" . | nindent 12 }}
+        spec:
+          restartPolicy: {{ .Values.cronjob.restartPolicy | default "OnFailure" }}
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          serviceAccountName: {{ include "application.serviceAccountName" . }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          containers:
+            - name: {{ .Values.cronjob.name | default "cron-runner" }}
+              image: {{ .Values.cronjob.image | default .Values.image }}:{{ .Values.cronjob.imageTag | default .Values.imageTag }}
+              imagePullPolicy: {{ .Values.cronjob.imagePullPolicy | default "IfNotPresent" }}
+              {{- if .Values.cronjob.command }}
+              command: {{ toYaml .Values.cronjob.command | nindent 16 }}
+              {{- end }}
+              {{- if .Values.cronjob.args }}
+              args: {{ toYaml .Values.cronjob.args | nindent 16 }}
+              {{- end }}
+              {{- $cronjobEnvVars := list }}
+              {{- if .Values.cronjob.env }}
+                {{- range .Values.cronjob.env }}
+                  {{- $cronjobEnvVars = append $cronjobEnvVars . }}
+                {{- end }}
+              {{- end }}
+              {{- with .Values.cronjob.envFromSecrets }}
+                {{- range . }}
+                  {{- $cronjobEnvVars = append $cronjobEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+                {{- end }}
+              {{- end }}
+              {{- if $cronjobEnvVars }}
+              env:
+                {{- range $cronjobEnvVars }}
+                - name: {{ .name }}
+                  {{- if .value }}
+                  value: {{ .value | quote }}
+                  {{- else if .valueFrom }}
+                  valueFrom:
+                    {{- toYaml .valueFrom | nindent 20 }}
+                  {{- end }}
+                {{- end }}
+              {{- end }}
+              {{- with .Values.cronjob.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              {{- $mounts := list }}
+              {{- with .Values.volumeMounts }}
+                {{- $mounts = append $mounts . }}
+              {{- end }}
+              {{- range .Values.configMaps }}
+              {{- if .mountPath }}
+                {{- $mounts = append $mounts (dict "name" .name "mountPath" .mountPath "subPath" .subPath "readOnly" (default true .readOnly)) }}
+              {{- end }}
+              {{- end }}
+              {{- if $mounts }}
+              volumeMounts:
+                {{- range $mount := $mounts }}
+                - name: {{ $mount.name }}
+                  mountPath: {{ $mount.mountPath }}
+                  {{- if $mount.subPath }}
+                  subPath: {{ $mount.subPath }}
+                  {{- end }}
+                  readOnly: {{ $mount.readOnly }}
+                {{- end }}
+              {{- end }}
+          {{- $vols := list }}
+          {{- with .Values.volumes }}
+            {{- $vols = append $vols . }}
+          {{- end }}
+          {{- range .Values.configMaps }}
+          {{- if .mountPath }}
+            {{- $vols = append $vols (dict "name" .name "configMap" (dict "name" .name "items" .items "defaultMode" .defaultMode)) }}
+          {{- end }}
+          {{- end }}
+          {{- if $vols }}
+          volumes:
+            {{- range $vol := $vols }}
+            - name: {{ $vol.name }}
+              {{- if $vol.secret }}
+              secret:
+                {{- toYaml $vol.secret | nindent 16 }}
+              {{- else if $vol.configMap }}
+              configMap:
+                name: {{ $vol.configMap.name }}
+                {{- if $vol.configMap.items }}
+                items:
+                  {{- toYaml $vol.configMap.items | nindent 18 }}
+                {{- end }}
+                {{- if $vol.configMap.defaultMode }}
+                defaultMode: {{ $vol.configMap.defaultMode }}
+                {{- end }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}
