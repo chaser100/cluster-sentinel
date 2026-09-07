@@ -1,0 +1,39 @@
+{{- $serviceMonitor := .Values.serviceMonitor | default dict -}}
+{{- if ($serviceMonitor.enabled | default false) }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ default (include "application.fullname" .) $serviceMonitor.name }}
+  {{- with $serviceMonitor.namespace }}
+  namespace: {{ . }}
+  {{- end }}
+  labels:
+    {{- include "application.labels" . | nindent 4 }}
+    {{- with $serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $serviceMonitor.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    {{- if $serviceMonitor.selector }}
+    {{- toYaml $serviceMonitor.selector | nindent 4 }}
+    {{- else }}
+    matchLabels:
+      {{- include "application.selectorLabels" . | nindent 6 }}
+    {{- end }}
+  {{- with $serviceMonitor.namespaceSelector }}
+  namespaceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- else }}
+  {{- with $serviceMonitor.namespace }}
+  namespaceSelector:
+    matchNames:
+      - {{ $.Release.Namespace }}
+  {{- end }}
+  {{- end }}
+  endpoints:
+    {{- toYaml $serviceMonitor.endpoints | nindent 4 }}
+{{- end }}

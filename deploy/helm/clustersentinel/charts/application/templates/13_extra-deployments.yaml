@@ -1,0 +1,122 @@
+{{- range $dep := .Values.extraDeployments }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ required "extraDeployments[].name is required" $dep.name }}
+  {{- with $dep.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $dep.labels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ default 1 $dep.replicas }}
+  selector:
+    matchLabels:
+      {{- toYaml (required (printf "extraDeployments[%s].selector.matchLabels is required" $dep.name) $dep.selector.matchLabels) | nindent 6 }}
+  template:
+    metadata:
+      {{- with $dep.template.annotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- toYaml (required (printf "extraDeployments[%s].template.labels is required" $dep.name) $dep.template.labels) | nindent 8 }}
+    spec:
+      {{- with $dep.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $dep.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $dep.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $dep.serviceAccountName }}
+      serviceAccountName: {{ . }}
+      {{- end }}
+      {{- with $dep.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $dep.volumes }}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ default $dep.name $dep.containerName }}
+          image: {{ default $.Values.image $dep.image }}:{{ default $.Values.imageTag $dep.imageTag }}
+          imagePullPolicy: {{ default $.Values.imagePullPolicy $dep.imagePullPolicy }}
+          {{- with $dep.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $dep.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $dep.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- $depEnvVars := list }}
+          {{- if $dep.env }}
+            {{- range $dep.env }}
+              {{- $depEnvVars = append $depEnvVars . }}
+            {{- end }}
+          {{- end }}
+          {{- if $dep.inheritEnv }}
+            {{- if $.Values.env }}
+              {{- range $.Values.env }}
+                {{- $depEnvVars = append $depEnvVars . }}
+              {{- end }}
+            {{- end }}
+            {{- if and $.Values.envSecrets $.Values.envSecrets.enableEnv }}
+              {{- range $.Values.envSecrets.envs }}
+                {{- $depEnvVars = append $depEnvVars (dict "name" .name "valueFrom" (dict "secretKeyRef" (dict "name" .secretName "key" .secretKey))) }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- if $depEnvVars }}
+          env:
+            {{- toYaml $depEnvVars | nindent 12 }}
+          {{- end }}
+          {{- $depEnvFromList := list }}
+          {{- if $dep.inheritEnv }}
+            {{- if and $.Values.envFromSecrets $.Values.envFromSecrets.enableEnvFrom }}
+              {{- $depEnvFromList = append $depEnvFromList (dict "secretRef" (dict "name" $.Values.envFromSecrets.secretName)) }}
+            {{- end }}
+            {{- if $.Values.envFrom }}
+              {{- range $.Values.envFrom }}
+                {{- $depEnvFromList = append $depEnvFromList . }}
+              {{- end }}
+            {{- end }}
+          {{- end }}
+          {{- with $dep.envFrom }}
+            {{- range . }}
+              {{- $depEnvFromList = append $depEnvFromList . }}
+            {{- end }}
+          {{- end }}
+          {{- if $depEnvFromList }}
+          envFrom:
+            {{- toYaml $depEnvFromList | nindent 12 }}
+          {{- end }}
+          {{- with $dep.ports }}
+          ports:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $dep.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with $dep.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

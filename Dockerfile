@@ -1,13 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
 FROM rust:1.89-bookworm AS builder
+ARG CARGO_BUILD_JOBS=1
+ARG CARGO_PROFILE_RELEASE_LTO=thin
 WORKDIR /src
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
-RUN cargo build --release --locked
+RUN cargo build --release --locked --jobs "$CARGO_BUILD_JOBS"
 
 FROM gcr.io/distroless/cc-debian12:nonroot
 ARG BUILD_VERSION=dev

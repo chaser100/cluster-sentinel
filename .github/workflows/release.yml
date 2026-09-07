@@ -9,19 +9,23 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: cluster-sentinel-release
   cancel-in-progress: false
 
 env:
   CHART_PATH: deploy/helm/clustersentinel
   IMAGE_NAME: chaser420/cluster-sentinel
   HELM_REPOSITORY_URL: https://chaser100.github.io/cluster-sentinel
+  CARGO_BUILD_JOBS: "1"
 
 jobs:
   validate:
     name: Validate release
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
     outputs:
       version: ${{ steps.version.outputs.version }}
 
@@ -29,7 +33,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release commit passed CI on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Release tags must point to a commit merged into main"
+            exit 1
+          fi
+          ci_runs_file="$(mktemp)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$GITHUB_SHA&per_page=100" > "$ci_runs_file"
+          if ! jq -e --arg commit "$GITHUB_SHA" 'any(.workflow_runs[]; .head_sha == $commit and .status == "completed" and .conclusion == "success")' "$ci_runs_file"; then
+            echo "::error::Wait for successful push CI on main for this exact commit before tagging"
+            exit 1
+          fi
 
       - name: Verify release tag and versions
         id: version
@@ -50,10 +72,12 @@ jobs:
           cargo_version="$(awk '/^\[package\]$/ { package=1; next } /^\[/ { package=0 } package && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.toml)"
           image_tag="$(awk '$0 == "clustersentinel:" { dependency=1; next } dependency && /^[^[:space:]]/ { dependency=0 } dependency && $1 == "imageTag:" { gsub(/"/, "", $2); print $2; exit }' "$CHART_PATH/values.yaml")"
           artifact_image_tag="$(awk '$1 == "image:" && $2 ~ /^chaser420\/cluster-sentinel:/ { split($2, parts, ":"); print parts[2]; exit }' "$CHART_PATH/Chart.yaml")"
+          schema_image_tag="$(jq -r '.properties.clustersentinel.properties.imageTag.default' "$CHART_PATH/values.schema.json")"
+          cargo_lock_version="$(awk '/^name = "clustersentinel"$/ { package=1; next } /^\[\[/ { package=0 } package && /^version = / { gsub(/"/, "", $3); print $3; exit }' Cargo.lock)"
 
-          for declared_version in "$chart_version" "$app_version" "$cargo_version" "$image_tag" "$artifact_image_tag"; do
+          for declared_version in "$chart_version" "$app_version" "$cargo_version" "$cargo_lock_version" "$image_tag" "$artifact_image_tag" "$schema_image_tag"; do
             if [[ "$declared_version" != "$version" ]]; then
-              echo "::error::Tag $version does not match a declared version: chart=$chart_version app=$app_version cargo=$cargo_version image=$image_tag artifact=$artifact_image_tag"
+              echo "::error::Tag $version does not match a declared version: chart=$chart_version app=$app_version cargo=$cargo_version lock=$cargo_lock_version image=$image_tag artifact=$artifact_image_tag schema=$schema_image_tag"
               exit 1
             fi
           done
@@ -74,23 +98,15 @@ jobs:
           version: v3.18.4
 
       - name: Validate Helm chart
-        shell: bash
-        run: |
-          set -euo pipefail
-          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
-          helm dependency build "$CHART_PATH"
-          helm lint "$CHART_PATH" --strict
-          helm lint "$CHART_PATH" --strict --values "$CHART_PATH/tests/values-observability.yaml"
-          helm template clustersentinel "$CHART_PATH" --namespace clustersentinel >/dev/null
-          helm template clustersentinel "$CHART_PATH" \
-            --namespace clustersentinel \
-            --values "$CHART_PATH/tests/values-observability.yaml" >/dev/null
+        uses: ./.github/actions/validate-chart
+        with:
+          chart-path: ${{ env.CHART_PATH }}
 
   publish-image:
     name: Publish Docker image
     needs: validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
@@ -106,9 +122,18 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
+        with:
+          platforms: arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          buildkitd-config: .github/buildkitd.toml
+          driver-opts: |
+            memory=1536m
+            memory-swap=1536m
+            cpu-period=100000
+            cpu-quota=200000
 
       - name: Build and push image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
@@ -121,6 +146,7 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ needs.validate.outputs.version }}
             ${{ env.IMAGE_NAME }}:latest
           build-args: |
+            CARGO_BUILD_JOBS=${{ env.CARGO_BUILD_JOBS }}
             BUILD_VERSION=${{ needs.validate.outputs.version }}
             VCS_REF=${{ github.sha }}
           cache-from: type=gha
@@ -128,12 +154,26 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Verify published image platforms
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "$IMAGE_NAME:$VERSION" --raw > manifest.json
+          jq -e '
+            any(.manifests[]; .platform.os == "linux" and .platform.architecture == "amd64") and
+            any(.manifests[]; .platform.os == "linux" and .platform.architecture == "arm64")
+          ' manifest.json
+
   publish-chart:
     name: Publish Helm chart
-    needs: validate
+    needs:
+      - validate
+      - publish-image
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: cluster-sentinel-k8s
     timeout-minutes: 20
 
     steps:
@@ -147,16 +187,23 @@ jobs:
         with:
           version: v3.18.4
 
-      - name: Package chart
+      - name: Validate and package chart
+        id: chart
+        uses: ./.github/actions/validate-chart
+        with:
+          chart-path: ${{ env.CHART_PATH }}
+
+      - name: Prepare release assets
+        env:
+          PACKAGE_PATH: ${{ steps.chart.outputs.package-path }}
+          VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          helm repo add u-helm-chart https://chaser100.github.io/u-helm-chart
-          helm dependency build "$CHART_PATH"
-          helm package "$CHART_PATH" --destination dist
-          sha256sum "dist/clustersentinel-${{ needs.validate.outputs.version }}.tgz" \
-            > "dist/clustersentinel-${{ needs.validate.outputs.version }}.tgz.sha256"
+          cp "$PACKAGE_PATH" "dist/clustersentinel-$VERSION.tgz"
+          cd dist
+          sha256sum "clustersentinel-$VERSION.tgz" > "clustersentinel-$VERSION.tgz.sha256"
 
       - name: Create or update GitHub Release
         env:
@@ -188,7 +235,7 @@ jobs:
       - publish-chart
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: cluster-sentinel-k8s
     timeout-minutes: 20
 
     steps:
@@ -205,21 +252,32 @@ jobs:
       - name: Download all chart packages
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.validate.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p site
           cp docs/.nojekyll docs/artifacthub-repo.yml docs/index.html site/
 
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > releases.json
+          jq -r '.[][] | select(.draft == false) | select(.tag_name | test("^v[0-9]+\\.[0-9]+\\.[0-9]+")) | .tag_name' \
+            releases.json > release-tags.txt
+          test -s release-tags.txt
+
           while IFS= read -r release_tag; do
             gh release download "$release_tag" \
-              --pattern "clustersentinel-*.tgz" \
+              --pattern "clustersentinel-${release_tag#v}.tgz" \
               --dir site \
-              --clobber || true
-          done < <(gh release list --limit 1000 --json tagName --jq '.[].tagName')
+              --clobber
+          done < release-tags.txt
 
-          test -f "site/clustersentinel-${{ needs.validate.outputs.version }}.tgz"
+          test -f "site/clustersentinel-$VERSION.tgz"
           helm repo index site --url "$HELM_REPOSITORY_URL"
+          while IFS= read -r release_tag; do
+            package_name="clustersentinel-${release_tag#v}.tgz"
+            test "$(helm show chart "site/$package_name" | awk '/^version:/ { print $2; exit }')" = "${release_tag#v}"
+            grep -Fq "$HELM_REPOSITORY_URL/$package_name" site/index.yaml
+          done < release-tags.txt
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -228,20 +286,53 @@ jobs:
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: site
+          retention-days: 7
 
   deploy-pages:
     name: Deploy Helm repository
-    needs: build-pages
+    needs:
+      - validate
+      - build-pages
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
+    runs-on: cluster-sentinel-k8s
     timeout-minutes: 15
 
     steps:
       - name: Deploy GitHub Pages
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.18.4
+
+      - name: Verify published Helm repository
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification_dir="$(mktemp -d)"
+          export HELM_CONFIG_HOME="$verification_dir/config"
+          export HELM_CACHE_HOME="$verification_dir/cache"
+          export HELM_DATA_HOME="$verification_dir/data"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error "$HELM_REPOSITORY_URL/index.yaml" -o "$verification_dir/index.yaml" &&
+               grep -Fq "$HELM_REPOSITORY_URL/clustersentinel-$VERSION.tgz" "$verification_dir/index.yaml"; then
+              break
+            fi
+            test "$attempt" -lt 6
+            sleep 10
+          done
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            "$HELM_REPOSITORY_URL/clustersentinel-$VERSION.tgz" -o "$verification_dir/chart.tgz"
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 \
+            "$HELM_REPOSITORY_URL/artifacthub-repo.yml" -o "$verification_dir/artifacthub-repo.yml"
+          test "$(helm show chart "$verification_dir/chart.tgz" | awk '/^version:/ { print $2; exit }')" = "$VERSION"
+          helm template clustersentinel "$verification_dir/chart.tgz" --namespace clustersentinel > "$verification_dir/rendered.yaml"

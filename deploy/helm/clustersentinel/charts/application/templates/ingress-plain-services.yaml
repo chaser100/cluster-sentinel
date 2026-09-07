@@ -1,0 +1,38 @@
+{{- if .Values.ingressPlain.enabled }}
+{{- $root := . }}
+{{- range $idx, $ing := .Values.ingressPlain.items }}
+  {{- range $rule := $ing.rules }}
+    {{- range $p := $rule.paths }}
+      {{- if $p.createService }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ default $p.backend.service.name $p.service.name }}
+  labels:
+    {{- include "application.labels" $root | nindent 4 }}
+    {{- with $p.service.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $p.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  type: {{ default "ClusterIP" $p.service.type }}
+  selector:
+    {{- if $p.service.selector }}
+    {{- toYaml $p.service.selector | nindent 4 }}
+    {{- else }}
+    {{- include "application.selectorLabels" $root | nindent 4 }}
+    {{- end }}
+  ports:
+    - name: {{ default "http" $p.service.portName }}
+      port: {{ default $p.backend.service.port $p.service.port }}
+      targetPort: {{ default (default $p.backend.service.targetPort $p.service.targetPort) (default $p.backend.service.port $p.service.port) }}
+      protocol: {{ default "TCP" $p.service.protocol }}
+---
+      {{- end }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,892 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "https://helm.networkcat89.com/schemas/application-values.schema.json",
+  "title": "Universal Helm Chart values",
+  "description": "Configuration schema for the reusable Universal Helm Chart.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "replicaCount": {
+      "description": "Number of Deployment replicas when autoscaling is disabled.",
+      "type": "integer",
+      "minimum": 0,
+      "default": 1
+    },
+    "deploymentDisable": {
+      "description": "Disable the main Deployment and its chart-managed Service.",
+      "type": "boolean",
+      "default": false
+    },
+    "image": {
+      "description": "Main container image repository.",
+      "type": "string",
+      "minLength": 1,
+      "default": "nginx"
+    },
+    "imageTag": {
+      "description": "Main container image tag.",
+      "$ref": "#/definitions/stringOrNumber",
+      "default": "latest"
+    },
+    "imagePullPolicy": {
+      "description": "Main container image pull policy.",
+      "type": "string",
+      "enum": [
+        "Always",
+        "IfNotPresent",
+        "Never"
+      ],
+      "default": "Always"
+    },
+    "imagePullSecrets": {
+      "description": "Image pull secrets for private registries.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "containerName": {
+      "description": "Override the main container name.",
+      "type": "string",
+      "default": ""
+    },
+    "command": {
+      "description": "Main container command.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "nameOverride": {
+      "description": "Override the application name.",
+      "type": "string",
+      "default": ""
+    },
+    "fullnameOverride": {
+      "description": "Override the fully qualified application name.",
+      "type": "string",
+      "default": ""
+    },
+    "serviceAccount": {
+      "description": "ServiceAccount configuration.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "create": {
+          "type": "boolean",
+          "default": true
+        },
+        "automount": {
+          "type": "boolean",
+          "default": true
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        }
+      }
+    },
+    "deploymentAnnotations": {
+      "description": "Annotations added to the Deployment.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "deploymentStrategy": {
+      "description": "Kubernetes Deployment update strategy. Leave empty to use Kubernetes defaults.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Deployment strategy type.",
+          "type": "string",
+          "enum": [
+            "RollingUpdate",
+            "Recreate"
+          ]
+        },
+        "rollingUpdate": {
+          "description": "Rolling update parameters used when type is RollingUpdate.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxUnavailable": {
+              "description": "Maximum unavailable Pods as an integer or percentage.",
+              "$ref": "#/definitions/intOrPercentage"
+            },
+            "maxSurge": {
+              "description": "Maximum additional Pods as an integer or percentage.",
+              "$ref": "#/definitions/intOrPercentage"
+            }
+          }
+        }
+      },
+      "default": {}
+    },
+    "podAnnotations": {
+      "description": "Annotations added to Pods.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "podLabels": {
+      "description": "Additional labels added to Pods.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "podSecurityContext": {
+      "description": "Pod-level security context.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "securityContext": {
+      "description": "Main container security context.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "shareProcessNamespace": {
+      "description": "Share the process namespace between containers in the Pod.",
+      "type": "boolean",
+      "default": false
+    },
+    "service": {
+      "description": "Chart-managed Kubernetes Service.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "description": "Service port name.",
+          "type": "string",
+          "minLength": 1,
+          "default": "http"
+        },
+        "type": {
+          "description": "Kubernetes Service type.",
+          "type": "string",
+          "enum": [
+            "ClusterIP",
+            "NodePort",
+            "LoadBalancer",
+            "ExternalName"
+          ],
+          "default": "ClusterIP"
+        },
+        "port": {
+          "description": "Service port.",
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "default": 80
+        },
+        "targetPort": {
+          "description": "Container port name or number targeted by the Service.",
+          "$ref": "#/definitions/port"
+        },
+        "protocol": {
+          "description": "Service port protocol.",
+          "type": "string",
+          "enum": [
+            "TCP",
+            "UDP",
+            "SCTP"
+          ],
+          "default": "TCP"
+        }
+      }
+    },
+    "serviceMonitor": {
+      "description": "Optional Prometheus Operator ServiceMonitor.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "description": "Create a ServiceMonitor resource.",
+          "type": "boolean",
+          "default": false
+        },
+        "name": {
+          "description": "Override the ServiceMonitor name.",
+          "type": "string",
+          "default": ""
+        },
+        "namespace": {
+          "description": "Override the ServiceMonitor namespace.",
+          "type": "string",
+          "default": ""
+        },
+        "labels": {
+          "description": "Additional ServiceMonitor labels used by Prometheus selectors.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "annotations": {
+          "description": "Additional ServiceMonitor annotations.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "selector": {
+          "description": "Override the selector for Services to monitor.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "namespaceSelector": {
+          "description": "Select Services from other namespaces.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "endpoints": {
+          "description": "Prometheus scrape endpoint definitions.",
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/serviceMonitorEndpoint"
+          }
+        }
+      }
+    },
+    "ingress": {
+      "description": "Primary Kubernetes Ingress configuration.",
+      "$ref": "#/definitions/ingress"
+    },
+    "route": {
+      "description": "Gateway API HTTPRoute configuration.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "spec": {
+          "description": "Complete HTTPRoute spec for advanced configuration. When non-empty, it replaces the spec generated from the simple route fields.",
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "name": {
+          "type": "string",
+          "default": ""
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "gateway": {
+          "description": "Parent Gateway name. Required in simple mode when the route is enabled and route.spec is empty.",
+          "type": "string",
+          "default": ""
+        },
+        "gatewayNamespace": {
+          "type": "string",
+          "default": ""
+        },
+        "sectionName": {
+          "type": "string",
+          "default": ""
+        },
+        "hostname": {
+          "type": "string",
+          "default": "chart-example.local"
+        },
+        "path": {
+          "type": "string",
+          "default": "/"
+        },
+        "pathMatchType": {
+          "type": "string",
+          "enum": [
+            "Exact",
+            "PathPrefix",
+            "RegularExpression"
+          ],
+          "default": "PathPrefix"
+        },
+        "backendWeight": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 1
+        },
+        "timeouts": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        }
+      }
+    },
+    "extra": {
+      "description": "Additional chart features, including a secondary Ingress.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "job": {
+      "description": "One-time Job configuration.",
+      "$ref": "#/definitions/batchWorkload"
+    },
+    "cronjob": {
+      "description": "Scheduled CronJob configuration.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/batchWorkload"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schedule": {
+              "description": "Cron schedule.",
+              "type": "string",
+              "default": "*/5 * * * *"
+            },
+            "successfulJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 2
+            },
+            "failedJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 1
+            }
+          }
+        }
+      ]
+    },
+    "resources": {
+      "description": "Main container resource requests and limits.",
+      "$ref": "#/definitions/resources"
+    },
+    "livenessProbe": {
+      "description": "Main container liveness probe.",
+      "$ref": "#/definitions/probe"
+    },
+    "readinessProbe": {
+      "description": "Main container readiness probe.",
+      "$ref": "#/definitions/probe"
+    },
+    "startupProbe": {
+      "description": "Main container startup probe.",
+      "$ref": "#/definitions/probe"
+    },
+    "lifecycle": {
+      "description": "Main container lifecycle hooks.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "autoscaling": {
+      "description": "Horizontal Pod Autoscaler configuration.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "minReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 1
+        },
+        "maxReplicas": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 100
+        },
+        "targetCPUUtilizationPercentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 80
+        },
+        "targetMemoryUtilizationPercentage": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "configmapAnnotations": {
+      "description": "Annotations added to generated ConfigMaps.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "configMaps": {
+      "description": "ConfigMaps created and optionally mounted by the chart.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "subPath": {
+            "type": "string"
+          },
+          "readOnly": {
+            "type": "boolean"
+          },
+          "data": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "default": []
+    },
+    "persistentVolumeClaims": {
+      "description": "PersistentVolumeClaims created by the chart.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "name",
+          "size"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "size": {
+            "type": "string",
+            "minLength": 1
+          },
+          "storageClassName": {
+            "type": "string"
+          },
+          "accessModes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mountPath": {
+            "type": "string"
+          },
+          "readOnly": {
+            "type": "boolean"
+          }
+        }
+      },
+      "default": []
+    },
+    "volumes": {
+      "description": "Additional Pod volumes.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "volumeMounts": {
+      "description": "Additional main container volume mounts.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "nodeSelector": {
+      "description": "Pod node selector.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "tolerations": {
+      "description": "Pod tolerations. Legacy empty-object defaults are accepted.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        {
+          "type": "object",
+          "maxProperties": 0
+        }
+      ]
+    },
+    "affinity": {
+      "description": "Pod affinity rules.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "initContainers": {
+      "description": "Init container configuration.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "extraContainers": {
+      "description": "Sidecar container configuration.",
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "env": {
+      "description": "Main container environment variables.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/envVar"
+      },
+      "default": []
+    },
+    "envFromSecrets": {
+      "description": "Legacy environment source configuration for a Secret.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "envFrom": {
+      "description": "Main container envFrom sources.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "envSecrets": {
+      "description": "Environment variables loaded from individual Secret keys.",
+      "type": "object",
+      "additionalProperties": true
+    },
+    "extraManifests": {
+      "description": "Additional raw Kubernetes manifests.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "extraDeployments": {
+      "description": "Additional Deployment resources.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "name"
+        ]
+      },
+      "default": []
+    },
+    "ingressPlain": {
+      "description": "Arbitrary Ingress resources with optional Service creation.",
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "intOrPercentage": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-9]+%$"
+        }
+      ]
+    },
+    "stringOrNumber": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "port": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      ]
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requests": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "limits": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "default": {}
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": true,
+      "default": {}
+    },
+    "envVar": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "valueFrom": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "serviceMonitorEndpoint": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "port": {
+          "description": "Name of the Service port to scrape.",
+          "type": "string"
+        },
+        "targetPort": {
+          "description": "Container port name or number to scrape.",
+          "$ref": "#/definitions/port"
+        },
+        "path": {
+          "type": "string",
+          "default": "/metrics"
+        },
+        "scheme": {
+          "type": "string",
+          "enum": [
+            "http",
+            "https"
+          ],
+          "default": "http"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "type": "string"
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "className": {
+          "type": "string",
+          "default": ""
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "labels": {
+          "type": "object",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "hosts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "host",
+              "paths"
+            ],
+            "properties": {
+              "host": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "required": [
+                    "path"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "pathType": {
+                      "type": "string",
+                      "enum": [
+                        "Exact",
+                        "Prefix",
+                        "ImplementationSpecific"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "default": []
+        }
+      }
+    },
+    "batchWorkload": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": false
+        },
+        "name": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "imageTag": {
+          "$ref": "#/definitions/stringOrNumber"
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "restartPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "OnFailure",
+            "Never"
+          ]
+        },
+        "backoffLimit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "command": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "env": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/envVar"
+          }
+        },
+        "envFrom": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "envFromSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "resources": {
+          "$ref": "#/definitions/resources"
+        }
+      }
+    }
+  }
+}

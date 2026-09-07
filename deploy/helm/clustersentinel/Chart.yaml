@@ -2,8 +2,8 @@ apiVersion: v2
 name: clustersentinel
 description: Kubernetes event collector with Prometheus metrics, alert rules, a Grafana dashboard, and an embedded MCP server
 type: application
-version: 0.9.0
-appVersion: "0.9.0"
+version: 0.9.1
+appVersion: "0.9.1"
 kubeVersion: ">=1.23.0-0"
 home: https://github.com/chaser100/cluster-sentinel
 sources:
@@ -22,10 +22,10 @@ annotations:
   artifacthub.io/license: MIT
   artifacthub.io/images: |
     - name: cluster-sentinel
-      image: chaser420/cluster-sentinel:0.9.0
+      image: chaser420/cluster-sentinel:0.9.1
   artifacthub.io/changes: |
-    - kind: added
-      description: Initial public release with Kubernetes event collection, Prometheus metrics, alert rules, a Grafana dashboard, and MCP access.
+    - kind: changed
+      description: Bundle application 0.3.9 in source control and validate packaged charts without downloading dependencies.
 dependencies:
   - name: application
     alias: clustersentinel

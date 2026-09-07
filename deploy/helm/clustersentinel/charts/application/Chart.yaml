@@ -1,0 +1,29 @@
+annotations:
+  artifacthub.io/displayName: Universal Helm Chart
+  artifacthub.io/license: MIT
+apiVersion: v2
+appVersion: 0.1.6
+description: Universal Helm chart for deploying applications to Kubernetes
+home: https://helm.networkcat89.com
+icon: https://helm.networkcat89.com/favicon.svg
+keywords:
+- universal-helm-chart
+- reusable-helm-chart
+- generic-helm-chart
+- application-helm-chart
+- kubernetes
+- helm
+- gitops
+- argocd
+- gateway-api
+- prometheus
+- service-monitor
+- observability
+maintainers:
+- email: v.lochashvili@protonmail.com
+  name: Vyacheslav Lochashvili
+name: application
+sources:
+- https://github.com/chaser100/u-helm-chart
+type: application
+version: 0.3.9

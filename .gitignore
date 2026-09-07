@@ -1,5 +1,5 @@
 /target/
-/deploy/helm/clustersentinel/charts/
+/deploy/helm/clustersentinel/charts/*.tgz
 **/*.rs.bk
 .idea/
 .vscode/

@@ -2,6 +2,8 @@
 
 This chart deploys Cluster Sentinel through the `application` chart version `0.3.9`, aliased as `clustersentinel`. Application-specific resources stay in this chart: read-only cluster RBAC, the MCP authentication Secret, Prometheus alert rules, and the Grafana dashboard ConfigMap.
 
+The complete dependency is bundled under `charts/application/` in both Git and the release archive. Rendering, packaging, and installation do not require `helm dependency build` or `helm dependency update`. The upstream repository URL in `Chart.yaml` records where the dependency comes from.
+
 ## Install
 
 ```bash
@@ -9,7 +11,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.0 \
+  --version 0.9.1 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -106,10 +108,9 @@ Gateway API and Prometheus Operator CRDs are not installed by this chart.
 | `grafanaDashboard.enabled` | `true` | Create the Grafana sidecar ConfigMap |
 | `prometheusRule.enabled` | `false` | Create the PrometheusRule |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository |
-| `clustersentinel.imageTag` | `0.9.0` | Container image tag; must match the chart version |
+| `clustersentinel.imageTag` | `0.9.1` | Container image tag; must match the chart version |
 | `clustersentinel.serviceMonitor.enabled` | `false` | Create a ServiceMonitor |
 | `clustersentinel.resources.requests` | `50m`, `128Mi` | Default CPU and memory requests |
 | `clustersentinel.resources.limits` | `500m`, `512Mi` | Default CPU and memory limits |
 
 All other workload values pass to the aliased [Universal Helm Chart](https://github.com/chaser100/u-helm-chart/tree/main/helm-charts/application).
-

@@ -1,0 +1,531 @@
+---
+replicaCount: 1
+
+imagePullPolicy: Always
+
+image: "nginx"
+
+imageTag: "latest"
+
+containerName: ""
+# Override default container name (defaults to Chart.Name if not set)
+
+command: []
+# Command to run in the main container
+#  - "/bin/sh"
+#  - "-c"
+#  - "echo hello"
+
+imagePullSecrets: []
+#  - name: imagepullsecret1
+#  - name: imagepullsecret2
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+deploymentAnnotations: {}
+#  prometheus.io/scrape: "true"
+
+deploymentStrategy: {}
+# type: RollingUpdate
+# rollingUpdate:
+#   maxUnavailable: 0
+#   maxSurge: 1
+
+podAnnotations: {}
+
+podLabels: {}
+
+podSecurityContext: {}
+
+shareProcessNamespace: false
+# Enable process namespace sharing between containers in the pod
+# When true, containers in the pod can see and signal processes from other containers
+
+securityContext: {}
+#   capabilities:
+#     drop:
+#     - ALL
+#   readOnlyRootFilesystem: true
+#   runAsNonRoot: true
+#   runAsUser: 1000
+
+service:
+  name: http
+  type: ClusterIP
+  port: 80
+  protocol: TCP
+
+serviceMonitor:
+  enabled: false
+  name: ""
+  namespace: ""
+  labels: {}
+  annotations: {}
+  selector: {}
+  namespaceSelector: {}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - chart-example.local
+
+route:
+  enabled: false
+  # route.gateway is required in simple mode when enabled=true.
+  # Set spec to a complete HTTPRoute spec for advanced Gateway API configuration.
+  spec: {}
+  name: ""
+  annotations: {}
+  labels: {}
+  gateway: ""
+  gatewayNamespace: ""
+  sectionName: ""
+  hostname: chart-example.local
+  path: /
+  pathMatchType: PathPrefix
+  backendWeight: 1
+  timeouts: {}
+  #  request: 75s
+  #  backendRequest: 75s
+
+extra:
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: extra.chart-example.local
+        paths:
+          - path: /
+            pathType: ImplementationSpecific
+    tls: []
+    #  - secretName: extra.chart-example-tls
+    #    hosts:
+    #      - extra.chart-example.local
+
+job:
+  enabled: false
+  name: my-job
+  nameOverride: ""
+  fullnameOverride: ""
+  annotations: {}
+  podAnnotations: {}
+  extraLabels: {}
+  serviceAccountName: ""
+  serviceAccountAnnotations: {}
+  image: ""
+  imageTag: ""
+  imagePullPolicy: IfNotPresent
+  restartPolicy: OnFailure
+  backoffLimit: 2
+  ttlSecondsAfterFinished: null
+  command: ["/bin/sh", "-c"]
+  args: []
+  # Job inherits base application env by default:
+  # - .Values.env
+  # - .Values.envFromSecrets (when enableEnvFrom=true)
+  # - .Values.envSecrets.envs (when enableEnv=true)
+  # Use job.env and job.envFrom for additional/override values.
+  env: []
+  #  - name: JOB_ENV
+  #    value: production
+  envFrom: []
+  #  - secretRef:
+  #      name: my-secret
+  #  - configMapRef:
+  #      name: my-config
+  envFromSecrets: []
+  #  - name: JOB_TOKEN
+  #    secretName: my-job-secret
+  #    secretKey: JOB_TOKEN
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+cronjob:
+  enabled: false
+  name: my-cronjob
+  image: busybox
+  imageTag: latest
+  imagePullPolicy: IfNotPresent
+  schedule: "*/5 * * * *"
+  restartPolicy: OnFailure
+  backoffLimit: 1
+  successfulJobsHistoryLimit: 2
+  failedJobsHistoryLimit: 1
+  command: ["/bin/sh", "-c"]
+  args: ["date >> /etc/cronlog/output.txt"]
+  env: []
+  #  - name: CRON_ENV
+  #    value: production
+  envFromSecrets:
+    - name: API_KEY
+      secretName: my-secret
+      secretKey: API_KEY
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+livenessProbe: {}
+#  httpGet:
+#    path: /
+#    port: http
+readinessProbe: {}
+#  httpGet:
+#    path: /
+#    port: http
+lifecycle: {}
+#  postStart:
+#    exec:
+#      command:
+#        - /bin/sh
+#        - -c
+#        - echo postStart
+#  preStop:
+#    exec:
+#      command:
+#        - /bin/sh
+#        - -c
+#        - echo preStop
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+configmapAnnotations: {}
+
+configMaps: []
+#  - name: my-config
+#    mountPath: /etc/my-config
+#    readOnly: true
+#    defaultMode: 0440
+#    data:
+#      app.conf: |
+#        debug = true
+#
+#  - name: partial-config
+#    mountPath: /etc/partial
+#    subPath: app.conf
+#    readOnly: false
+#    items:
+#      - key: app.conf
+#        path: config-file
+#    data:
+#      app.conf: |
+#        key=value
+
+persistentVolumeClaims: []
+#  - name: data-storage
+#    size: 10Gi
+#    storageClassName: fast-ssd
+#    accessModes:
+#      - ReadWriteOnce
+#    mountPath: /data
+#    readOnly: false
+#    annotations: {}
+#  - name: logs-storage
+#    size: 5Gi
+#    storageClassName: standard
+#    accessModes:
+#      - ReadWriteOnce
+#    mountPath: /var/log
+#    readOnly: false
+#    resources:
+#      requests:
+#        storage: 5Gi
+
+volumes: []
+#  - name: custom-secret
+#    secret:
+#      secretName: mysecret
+#      optional: false
+
+volumeMounts: []
+#  - name: custom-secret
+#    mountPath: "/etc/custom-secret"
+#    readOnly: true
+
+nodeSelector: {}
+#  node-role.kubernetes.io/app: ""
+
+tolerations: {}
+#  - key: "node-role.kubernetes.io/app"
+#    operator: "Exists"
+#    effect: "NoSchedule"
+
+affinity: {}
+
+initContainers: {}
+#  enabled: true
+#  containers:
+#    - name: init-migration
+#      image: busybox
+#      imageTag: latest
+#      imagePullPolicy: IfNotPresent
+#      command: ["/bin/sh", "-c"]
+#      args: ["echo 'Running migration'"]
+#      env:
+#        - name: INIT_ENV
+#          value: production
+#      envFromSecrets:
+#        - name: DB_PASSWORD
+#          secretName: db-secret
+#          secretKey: password
+#      envFrom:
+#        - secretRef:
+#            name: app-secrets
+#        - configMapRef:
+#            name: app-config
+#      volumeMounts:
+#        - name: init-data
+#          mountPath: /mnt/init
+#      pvc:
+#        enabled: true
+#        name: init-migration-pvc
+#        size: 5Gi
+#        storageClassName: fast-ssd
+#        accessModes:
+#          - ReadWriteOnce
+#        mountPath: /data
+#        readOnly: false
+#      securityContext:
+#        runAsNonRoot: true
+#        runAsUser: 1000
+#      resources:
+#        requests:
+#          cpu: 50m
+#          memory: 64Mi
+#        limits:
+#          cpu: 100m
+#          memory: 128Mi
+
+extraContainers: {}
+#  enabled: true
+#  containers:
+#    - name: sidecar
+#      image: busybox
+#      command: [ "sleep", "3600" ]
+#      env:
+#        - name: SIDECAR_ENV
+#          value: production
+#      envFromSecrets:
+#        - name: BAR
+#          secretName: example-external-secret
+#          secretKey: BAR
+#      volumeMounts:
+#        - name: my-config
+#          mountPath: /mnt/config
+#      securityContext:
+#        runAsNonRoot: true
+#        runAsUser: 1000
+#      pvc:
+#        enabled: true
+#        name: sidecar-pvc
+#        size: 10Gi
+#        storageClassName: standard
+#        accessModes:
+#          - ReadWriteOnce
+#        mountPath: /var/log
+#        readOnly: false
+
+env: []
+#  - name: ENVIRONMENT
+#    value: production
+#  - name: LOG_LEVEL
+#    value: info
+#  - name: APP_NAME
+#    value: my-app
+
+envFromSecrets:
+  enableEnvFrom: false
+  secretName: example-external-secret
+
+envFrom: []
+#  - secretRef:
+#      name: app-secrets
+#  - configMapRef:
+#      name: app-config
+
+envSecrets:
+  enableEnv: false
+  envs:
+    - name: FOO
+      secretName: example-external-secret
+      secretKey: FOO
+    - name: BAR
+      secretName: example-external-secret
+      secretKey: BAR
+
+extraManifests: []
+#  - apiVersion: external-secrets.io/v1beta1
+#    kind: ExternalSecret
+#    metadata:
+#      name: example-external-secret
+#      namespace: example
+#    spec:
+#      refreshInterval: 10s
+#      secretStoreRef:
+#        name: vault-cluster-backend
+#        kind: ClusterSecretStore
+#      target:
+#        name: example-external-secret
+#        template:
+#          type: Opaque
+#      data:
+#        - secretKey: FOO
+#          remoteRef:
+#            key: path/keys
+#            property: FOO
+#        - secretKey: BAR
+#          remoteRef:
+#            key: path/keys
+#            property: BAR
+
+extraDeployments: []
+#  - name: app-worker-default
+#    replicas: 1
+#    annotations:
+#      reloader.stakater.com/auto: "true"
+#    selector:
+#      matchLabels:
+#        app: app-worker-default
+#    template:
+#      labels:
+#        app: app-worker-default
+#    nodeSelector:
+#      role: production
+#    tolerations:
+#      - key: workload.example.com/production
+#        operator: Equal
+#        value: "true"
+#        effect: NoSchedule
+#    image: "" # optional, defaults to .Values.image
+#    imageTag: "" # optional, defaults to .Values.imageTag
+#    imagePullPolicy: "" # optional, defaults to .Values.imagePullPolicy
+#    inheritEnv: false # when true, inherit .Values.env/.Values.envFrom/.Values.envSecrets/.Values.envFromSecrets
+#    command: ["php", "artisan", "queue:work", "--queue=default"]
+#    envFrom:
+#      - secretRef:
+#          name: app-config
+#    resources:
+#      requests:
+#        cpu: 1000m
+#        memory: 1Gi
+#      limits:
+#        cpu: 1000m
+#        memory: 1Gi
+
+ingressPlain:
+  enabled: false
+
+#ingressPlain:
+#  enabled: true
+#  items:
+#    - name: public-api
+#      className: nginx
+#      annotations:
+#        nginx.ingress.kubernetes.io/rewrite-target: /
+#      rules:
+#        - host: api.example.com
+#          paths:
+#            - path: /
+#              backend:
+#                service:
+#                  name: users-service
+#                  port: 8080
+#              createService: true
+#              service:
+#                type: ClusterIP
+#                selector:
+#                  app: users
+#                port: 8080
+#
+#            - path: /orders
+#              backend:
+#                service:
+#                  name: orders-service
+#                  port: 9090
+#              createService: false
+#
+#    - name: internal-dashboard
+#      className: nginx-internal
+#      annotations:
+#        nginx.ingress.kubernetes.io/auth-type: basic
+#        nginx.ingress.kubernetes.io/auth-secret: dashboard-auth
+#      tls:
+#        - secretName: dashboard-tls
+#          hosts:
+#            - dashboard.internal.local
+#      rules:
+#        - host: dashboard.internal.local
+#          paths:
+#            - path: /
+#              backend:
+#                service:
+#                  name: dashboard-service
+#                  port: 3000
+#              createService: true
+#              service:
+#                type: ClusterIP
+#                selector:
+#                  app: dashboard
+#                port: 3000
+#
+#    - name: external-tools
+#      className: nginx
+#      rules:
+#        - host: tools.example.net
+#          paths:
+#            - path: /grafana
+#              backend:
+#                service:
+#                  name: grafana
+#                  port: 80
+#              createService: false
+#            - path: /prometheus
+#              backend:
+#                service:
+#                  name: prometheus
+#                  port: 9090
+#              createService: false

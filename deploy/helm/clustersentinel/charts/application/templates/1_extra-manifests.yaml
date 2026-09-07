@@ -1,0 +1,16 @@
+{{- range .Values.extraManifests }}
+{{- $isExternalSecret := eq (default "" .kind) "ExternalSecret" }}
+{{- if $isExternalSecret }}
+{{- if not .metadata }}
+{{- $_ := set . "metadata" dict }}
+{{- end }}
+{{- if not .metadata.annotations }}
+{{- $_ := set .metadata "annotations" dict }}
+{{- end }}
+{{- $_ := set .metadata.annotations "helm.sh/hook" "pre-install,pre-upgrade" }}
+{{- $_ := set .metadata.annotations "helm.sh/hook-weight" "-5" }}
+{{- $_ := set .metadata.annotations "helm.sh/hook-delete-policy" "before-hook-creation" }}
+{{- end }}
+---
+{{ tpl (toYaml .) $ }}
+{{- end }}
