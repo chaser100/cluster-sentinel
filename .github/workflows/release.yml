@@ -334,5 +334,6 @@ jobs:
             "$HELM_REPOSITORY_URL/clustersentinel-$VERSION.tgz" -o "$verification_dir/chart.tgz"
           curl --fail --silent --show-error --retry 5 --retry-delay 5 \
             "$HELM_REPOSITORY_URL/artifacthub-repo.yml" -o "$verification_dir/artifacthub-repo.yml"
+          grep -Fqx 'repositoryID: fd95efee-b435-4990-9f37-529a4ff5dba1' "$verification_dir/artifacthub-repo.yml"
           test "$(helm show chart "$verification_dir/chart.tgz" | awk '/^version:/ { print $2; exit }')" = "$VERSION"
           helm template clustersentinel "$verification_dir/chart.tgz" --namespace clustersentinel > "$verification_dir/rendered.yaml"

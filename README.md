@@ -321,7 +321,7 @@ Configure the repository before the first tag:
 
 If Pages rejects a release because of environment protection rules, add the tag rule and rerun the failed deployment job. If the `github-pages` artifact has expired, rerun `Build Helm repository` and its dependent deployment job to generate a fresh artifact.
 
-To list the chart on Artifact Hub, add a Helm repository with URL `https://chaser100.github.io/cluster-sentinel`. Artifact Hub reads `index.yaml` and `artifacthub-repo.yml` from that URL. Add the repository ID issued by Artifact Hub to `docs/artifacthub-repo.yml` if you want the verified publisher badge.
+The chart is registered in Artifact Hub from `https://chaser100.github.io/cluster-sentinel`. The repository ID `fd95efee-b435-4990-9f37-529a4ff5dba1` is stored in `docs/artifacthub-repo.yml` for the Verified publisher check. The `Helm Repository` workflow publishes metadata changes from `main` without rebuilding the application image or creating another release. Artifact Hub applies the badge when it processes an index that serves this metadata file.
 
 ## License
 

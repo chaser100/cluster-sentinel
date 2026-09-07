@@ -1,0 +1,125 @@
+name: Helm Repository
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - docs/.nojekyll
+      - docs/artifacthub-repo.yml
+      - docs/index.html
+      - .github/workflows/helm-repository.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cluster-sentinel-release
+  cancel-in-progress: false
+
+env:
+  HELM_REPOSITORY_URL: https://chaser100.github.io/cluster-sentinel
+
+jobs:
+  build-pages:
+    name: Build Helm repository
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 20
+    outputs:
+      index_sha256: ${{ steps.site.outputs.index_sha256 }}
+      metadata_sha256: ${{ steps.site.outputs.metadata_sha256 }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        with:
+          version: v3.18.4
+
+      - name: Build repository site
+        id: site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp docs/.nojekyll docs/artifacthub-repo.yml docs/index.html site/
+
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' \
+            | sort --version-sort --unique > release-tags.txt
+          test -s release-tags.txt
+
+          while IFS= read -r release_tag; do
+            gh release download "$release_tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "clustersentinel-${release_tag#v}.tgz" \
+              --dir site \
+              --clobber
+          done < release-tags.txt
+
+          helm repo index site --url "$HELM_REPOSITORY_URL"
+          while IFS= read -r release_tag; do
+            package_name="clustersentinel-${release_tag#v}.tgz"
+            test "$(helm show chart "site/$package_name" | awk '/^version:/ { print $2; exit }')" = "${release_tag#v}"
+            grep -Fq "$HELM_REPOSITORY_URL/$package_name" site/index.yaml
+          done < release-tags.txt
+
+          grep -Fqx 'repositoryID: fd95efee-b435-4990-9f37-529a4ff5dba1' site/artifacthub-repo.yml
+          echo "index_sha256=$(sha256sum site/index.yaml | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+          echo "metadata_sha256=$(sha256sum site/artifacthub-repo.yml | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site
+          retention-days: 7
+
+  deploy-pages:
+    name: Deploy Helm repository
+    needs: build-pages
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+      - name: Verify published repository
+        env:
+          EXPECTED_INDEX_SHA256: ${{ needs.build-pages.outputs.index_sha256 }}
+          EXPECTED_METADATA_SHA256: ${{ needs.build-pages.outputs.metadata_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          verification_dir="$(mktemp -d)"
+          for attempt in 1 2 3 4 5 6; do
+            if curl --fail --silent --show-error \
+                 "$HELM_REPOSITORY_URL/index.yaml" -o "$verification_dir/index.yaml" &&
+               curl --fail --silent --show-error \
+                 "$HELM_REPOSITORY_URL/artifacthub-repo.yml" -o "$verification_dir/artifacthub-repo.yml" &&
+               test "$(sha256sum "$verification_dir/index.yaml" | awk '{ print $1 }')" = "$EXPECTED_INDEX_SHA256" &&
+               test "$(sha256sum "$verification_dir/artifacthub-repo.yml" | awk '{ print $1 }')" = "$EXPECTED_METADATA_SHA256"; then
+              exit 0
+            fi
+            test "$attempt" -lt 6
+            sleep 10
+          done
+          exit 1
