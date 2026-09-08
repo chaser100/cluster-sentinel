@@ -26,4 +26,4 @@ name: application
 sources:
 - https://github.com/chaser100/u-helm-chart
 type: application
-version: 0.3.9
+version: 0.4.1

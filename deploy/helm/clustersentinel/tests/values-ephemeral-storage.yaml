@@ -1,0 +1,5 @@
+clustersentinel:
+  persistentVolumeClaims: []
+  env:
+    - name: CLUSTERSENTINEL_STORAGE_PATH
+      value: memory

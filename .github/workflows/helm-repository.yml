@@ -8,6 +8,7 @@ on:
       - docs/.nojekyll
       - docs/artifacthub-repo.yml
       - docs/index.html
+      - docs/logo.svg
       - .github/workflows/helm-repository.yml
   workflow_dispatch:
 
@@ -29,6 +30,7 @@ jobs:
     outputs:
       index_sha256: ${{ steps.site.outputs.index_sha256 }}
       metadata_sha256: ${{ steps.site.outputs.metadata_sha256 }}
+      logo_sha256: ${{ steps.site.outputs.logo_sha256 }}
 
     steps:
       - name: Checkout repository
@@ -50,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p site
-          cp docs/.nojekyll docs/artifacthub-repo.yml docs/index.html site/
+          cp docs/.nojekyll docs/artifacthub-repo.yml docs/index.html docs/logo.svg site/
 
           gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))' \
@@ -75,6 +77,7 @@ jobs:
           grep -Fqx 'repositoryID: fd95efee-b435-4990-9f37-529a4ff5dba1' site/artifacthub-repo.yml
           echo "index_sha256=$(sha256sum site/index.yaml | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
           echo "metadata_sha256=$(sha256sum site/artifacthub-repo.yml | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+          echo "logo_sha256=$(sha256sum site/logo.svg | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
@@ -106,6 +109,7 @@ jobs:
         env:
           EXPECTED_INDEX_SHA256: ${{ needs.build-pages.outputs.index_sha256 }}
           EXPECTED_METADATA_SHA256: ${{ needs.build-pages.outputs.metadata_sha256 }}
+          EXPECTED_LOGO_SHA256: ${{ needs.build-pages.outputs.logo_sha256 }}
         shell: bash
         run: |
           set -euo pipefail
@@ -115,8 +119,11 @@ jobs:
                  "$HELM_REPOSITORY_URL/index.yaml" -o "$verification_dir/index.yaml" &&
                curl --fail --silent --show-error \
                  "$HELM_REPOSITORY_URL/artifacthub-repo.yml" -o "$verification_dir/artifacthub-repo.yml" &&
+               curl --fail --silent --show-error \
+                 "$HELM_REPOSITORY_URL/logo.svg" -o "$verification_dir/logo.svg" &&
                test "$(sha256sum "$verification_dir/index.yaml" | awk '{ print $1 }')" = "$EXPECTED_INDEX_SHA256" &&
-               test "$(sha256sum "$verification_dir/artifacthub-repo.yml" | awk '{ print $1 }')" = "$EXPECTED_METADATA_SHA256"; then
+               test "$(sha256sum "$verification_dir/artifacthub-repo.yml" | awk '{ print $1 }')" = "$EXPECTED_METADATA_SHA256" &&
+               test "$(sha256sum "$verification_dir/logo.svg" | awk '{ print $1 }')" = "$EXPECTED_LOGO_SHA256"; then
               exit 0
             fi
             test "$attempt" -lt 6

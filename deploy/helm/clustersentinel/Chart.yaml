@@ -1,11 +1,13 @@
+---
 apiVersion: v2
 name: clustersentinel
-description: Kubernetes event collector with Prometheus metrics, alert rules, a Grafana dashboard, and an embedded MCP server
+description: Durable Kubernetes Event collector with Prometheus alerts, a Grafana dashboard, an HTTP API, and an embedded MCP server
 type: application
-version: 0.9.1
-appVersion: "0.9.1"
+version: 0.9.2
+appVersion: "0.9.2"
 kubeVersion: ">=1.23.0-0"
 home: https://github.com/chaser100/cluster-sentinel
+icon: https://chaser100.github.io/cluster-sentinel/logo.svg
 sources:
   - https://github.com/chaser100/cluster-sentinel
 maintainers:
@@ -17,17 +19,37 @@ keywords:
   - prometheus
   - grafana
   - mcp
+  - monitoring
+  - alerting
+  - sqlite
+  - troubleshooting
 annotations:
   artifacthub.io/displayName: Cluster Sentinel
+  artifacthub.io/category: monitoring-logging
   artifacthub.io/license: MIT
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://github.com/chaser100/cluster-sentinel/blob/main/README.md
+    - name: MCP contract
+      url: https://github.com/chaser100/cluster-sentinel/blob/main/docs/mcp.md
+    - name: Docker images
+      url: https://hub.docker.com/r/chaser420/cluster-sentinel
+    - name: Issue tracker
+      url: https://github.com/chaser100/cluster-sentinel/issues
   artifacthub.io/images: |
     - name: cluster-sentinel
-      image: chaser420/cluster-sentinel:0.9.1
+      image: chaser420/cluster-sentinel:0.9.2
   artifacthub.io/changes: |
+    - kind: added
+      description: Persist Kubernetes Events and watch checkpoints in SQLite on a chart-managed PVC.
+    - kind: added
+      description: Expose storage readiness, metrics, Prometheus alerts, and Grafana dashboard panels.
     - kind: changed
-      description: Bundle application 0.3.9 in source control and validate packaged charts without downloading dependencies.
+      description: Update the bundled Universal Helm Chart dependency to application 0.4.1.
+    - kind: changed
+      description: Expand the Artifact Hub documentation and add package branding, category, and project links.
 dependencies:
   - name: application
     alias: clustersentinel
-    version: 0.3.9
+    version: 0.4.1
     repository: https://chaser100.github.io/u-helm-chart

@@ -96,11 +96,11 @@ matching `structuredContent` JSON.
 Extended health JSON:
 
 - `status`: `starting` | `healthy` | `degraded` | `unhealthy` (from watch state)
-- `watch_state`, `events_mode`, `registry_size`
+- `watch_state`, `events_mode`, `registry_size`, `store_rows`
 - `started_at`, `uptime_seconds`, `last_event_at`, `last_watch_success_at`, `last_watch_error_at`
 - `last_error`, `consecutive_failures`
 - `configured_namespaces`, `registry_capacity`, `retention_seconds`
-- `oldest_event_at`, `newest_event_at`, `build_version`, `git_sha`
+- `oldest_event_at`, `newest_event_at`, `storage_status`, `storage_backend`, `build_version`, `git_sha`
 
 Input: none.
 
@@ -117,12 +117,12 @@ List registered cluster events (newest `observed_at` first).
 
 ### `search_events`
 
-Rich filter with opaque cursor pagination.
+Rich filter with opaque keyset cursor pagination.
 
 | Field | Type | Default | Notes |
 |-------|------|---------|-------|
 | `limit` | u32 | `50` | max `500` |
-| `cursor` | string? | — | previous `next_cursor`; treat it as opaque |
+| `cursor` | string? | — | preferred: the versioned keyset token from `next_cursor`; deprecated decimal offsets remain accepted |
 | `since` / `until` | RFC3339? | — | filter by `observed_at` |
 | `namespaces` / `types` / `reasons` | string[] | `[]` | any-of match; types are `Normal` / `Warning` |
 | `involved_kind` / `involved_name` / `involved_uid` | string? | — | object filters (`name` substring) |
@@ -130,6 +130,8 @@ Rich filter with opaque cursor pagination.
 | `message_contains` | string? | — | case-insensitive |
 
 Response: `events`, `matched`, `returned`, `truncated`, `next_cursor`, `generated_at`.
+
+When more rows remain, `next_cursor` is a versioned keyset token ordered by `(observed_at DESC, event_uid DESC)` and excludes the cursor event. Event query tools and `clustersentinel://events/recent` read durable SQLite history; the in-memory registry remains a hot cache for metrics and health state.
 
 ### `summarize_events`
 

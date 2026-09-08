@@ -39,6 +39,7 @@ runs:
         test "${#dependency_archives[@]}" -eq 0
 
         jq empty "$CHART_PATH/values.schema.json" "$CHART_PATH/dashboards/clustersentinel.json"
+        python3 scripts/validate-observability.py
         cmp observability/alerts/clustersentinel.yaml "$CHART_PATH/alerts/clustersentinel.yaml"
         cmp observability/dashboards/clustersentinel.json "$CHART_PATH/dashboards/clustersentinel.json"
         helm lint "$CHART_PATH" --strict
@@ -60,6 +61,19 @@ runs:
           helm template clustersentinel "$package_path" --namespace clustersentinel \
             --values "$values_file" > "$validation_dir/$(basename "$values_file")"
         done
+        grep -q '^kind: PersistentVolumeClaim$' "$validation_dir/default.yaml"
+        grep -q 'name: clustersentinel-data' "$validation_dir/default.yaml"
+        grep -q 'helm.sh/resource-policy: keep' "$validation_dir/default.yaml"
+        grep -q 'mountPath: /var/lib/clustersentinel' "$validation_dir/default.yaml"
+        grep -q 'fsGroup: 65532' "$validation_dir/default.yaml"
+        grep -q 'path: /ready' "$validation_dir/default.yaml"
+        grep -q 'type: Recreate' "$validation_dir/default.yaml"
+        grep -q '/var/lib/clustersentinel/events.db' "$validation_dir/default.yaml"
+        if grep -q '^kind: PersistentVolumeClaim$' "$validation_dir/values-ephemeral-storage.yaml"; then
+          echo '::error::Ephemeral storage configuration must not generate a PersistentVolumeClaim'
+          exit 1
+        fi
+        grep -q 'value: "memory"' "$validation_dir/values-ephemeral-storage.yaml"
         if grep -q '^kind: Secret$' "$validation_dir/values-existing-secret.yaml"; then
           echo '::error::Existing Secret configuration must not generate a Secret'
           exit 1

@@ -98,7 +98,7 @@
         },
         "imageTag": {
           "$ref": "#/definitions/stringOrNumber",
-          "default": "0.9.1"
+          "default": "0.9.2"
         },
         "imagePullPolicy": {
           "type": "string",
@@ -116,6 +116,75 @@
             "additionalProperties": true
           },
           "default": []
+        },
+        "deploymentStrategy": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "Recreate",
+                "RollingUpdate"
+              ],
+              "default": "Recreate"
+            }
+          }
+        },
+        "persistentVolumeClaims": {
+          "description": "PersistentVolumeClaims created and mounted by the Universal Helm Chart.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "name",
+              "size"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "size": {
+                "type": "string",
+                "minLength": 1
+              },
+              "storageClassName": {
+                "type": "string"
+              },
+              "accessModes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "mountPath": {
+                "type": "string",
+                "minLength": 1
+              },
+              "readOnly": {
+                "type": "boolean"
+              }
+            }
+          },
+          "default": [
+            {
+              "name": "clustersentinel-data",
+              "size": "5Gi",
+              "storageClassName": "",
+              "accessModes": [
+                "ReadWriteOnce"
+              ],
+              "mountPath": "/var/lib/clustersentinel",
+              "readOnly": false,
+              "annotations": {
+                "helm.sh/resource-policy": "keep",
+                "argocd.argoproj.io/sync-options": "Prune=false"
+              }
+            }
+          ]
         },
         "service": {
           "type": "object",
@@ -221,7 +290,22 @@
         },
         "podSecurityContext": {
           "type": "object",
-          "additionalProperties": true
+          "additionalProperties": true,
+          "properties": {
+            "fsGroup": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 65532
+            },
+            "fsGroupChangePolicy": {
+              "type": "string",
+              "enum": [
+                "Always",
+                "OnRootMismatch"
+              ],
+              "default": "OnRootMismatch"
+            }
+          }
         },
         "envSecrets": {
           "type": "object",

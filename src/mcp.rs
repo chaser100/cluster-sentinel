@@ -3,7 +3,6 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::{DateTime, Utc};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler, handler::server::wrapper::Parameters,
@@ -14,7 +13,8 @@ use serde_json::json;
 
 use crate::config::EventsMode;
 use crate::events::{
-    EventQuery, EventRegistry, EventSearchQuery, SummaryGroupBy, WatchStateHandle,
+    EventQuery, EventRegistry, EventSearchQuery, EventStoreHandle, ParsedCursor,
+    StorageHealthHandle, SummaryGroupBy, WatchStateHandle, encode_keyset_cursor, parse_cursor,
 };
 use crate::metrics::Metrics;
 
@@ -22,8 +22,10 @@ use crate::metrics::Metrics;
 #[derive(Clone)]
 pub struct AppState {
     pub registry: EventRegistry,
+    pub store: EventStoreHandle,
     pub metrics: Metrics,
     pub watch_state: WatchStateHandle,
+    pub storage_health: StorageHealthHandle,
     pub events_mode: EventsMode,
     pub configured_namespaces: Vec<String>,
     pub build_version: String,
@@ -79,6 +81,9 @@ pub struct SearchEventsArgs {
     #[serde(default = "default_search_limit")]
     pub limit: u32,
     /// Opaque cursor from a previous `next_cursor`.
+    ///
+    /// Preferred: versioned keyset `v1:<rfc3339>|<event_uid>`.
+    /// Deprecated compatibility: decimal offset string.
     #[serde(default)]
     pub cursor: Option<String>,
     #[serde(default)]
@@ -131,8 +136,10 @@ fn default_group_by() -> Vec<String> {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct HealthOutput {
     status: String,
+    ready: bool,
     events_mode: String,
     registry_size: usize,
+    store_rows: usize,
     watch_state: String,
     started_at: DateTime<Utc>,
     uptime_seconds: i64,
@@ -148,6 +155,11 @@ struct HealthOutput {
     newest_event_at: Option<DateTime<Utc>>,
     build_version: String,
     git_sha: String,
+    storage_status: String,
+    storage_backend: String,
+    last_storage_error_at: Option<DateTime<Utc>>,
+    last_storage_success_at: Option<DateTime<Utc>>,
+    last_storage_error: Option<String>,
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -184,11 +196,17 @@ struct SummarizeEventsOutput {
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 struct MetricsSummaryOutput {
     registry_size: usize,
+    store_rows: usize,
     events_deduped_total: u64,
     watch_restarts_total: u64,
     watch_errors_total: u64,
     watch_state: String,
     events_mode: String,
+    storage_status: String,
+    storage_backend: String,
+    storage_rows: i64,
+    storage_bytes: i64,
+    storage_last_success_timestamp: i64,
 }
 
 fn parse_group_by(raw: &[String]) -> Result<Vec<SummaryGroupBy>, McpError> {
@@ -239,21 +257,33 @@ fn validate_event_types(event_types: &[String]) -> Result<(), McpError> {
     Ok(())
 }
 
-fn encode_cursor(offset: usize) -> String {
-    URL_SAFE_NO_PAD.encode(format!("v1:{offset}"))
+struct CursorQueryParts {
+    offset: usize,
+    after: Option<(DateTime<Utc>, String)>,
 }
 
-fn parse_cursor(cursor: Option<&str>) -> Result<usize, McpError> {
-    match cursor {
-        None => Ok(0),
-        Some(raw) => URL_SAFE_NO_PAD
-            .decode(raw)
-            .ok()
-            .and_then(|decoded| String::from_utf8(decoded).ok())
-            .and_then(|decoded| decoded.strip_prefix("v1:").map(str::to_owned))
-            .and_then(|offset| offset.parse::<usize>().ok())
-            .ok_or_else(|| McpError::invalid_params("invalid cursor", None)),
+fn cursor_to_query_parts(cursor: Option<&str>) -> Result<CursorQueryParts, McpError> {
+    match parse_cursor(cursor).map_err(|err| McpError::invalid_params(err, None))? {
+        ParsedCursor::Start => Ok(CursorQueryParts {
+            offset: 0,
+            after: None,
+        }),
+        ParsedCursor::Offset(offset) => Ok(CursorQueryParts {
+            offset,
+            after: None,
+        }),
+        ParsedCursor::Keyset {
+            observed_at,
+            event_uid,
+        } => Ok(CursorQueryParts {
+            offset: 0,
+            after: Some((observed_at, event_uid)),
+        }),
     }
+}
+
+fn store_err(err: impl std::fmt::Display) -> McpError {
+    McpError::internal_error(format!("event store error: {err}"), None)
 }
 
 #[tool_router]
@@ -279,9 +309,7 @@ impl SentinelMcp {
     )]
     async fn get_health(&self) -> Result<CallToolResult, McpError> {
         self.with_tool_metrics("get_health", 0, || async {
-            let payload = serde_json::to_value(self.health_output().await).map_err(|err| {
-                McpError::internal_error(format!("failed to serialize health: {err}"), None)
-            })?;
+            let payload = self.health_json().await?;
             Ok(CallToolResult::structured(payload))
         })
         .await
@@ -309,14 +337,15 @@ impl SentinelMcp {
         self.with_tool_metrics("list_recent_events", 0, || async {
             let events = self
                 .state
-                .registry
-                .list(EventQuery {
+                .store
+                .list(&EventQuery {
                     limit,
                     namespace: args.namespace,
                     reason: args.reason,
                     type_filter: args.type_filter,
                 })
-                .await;
+                .await
+                .map_err(store_err)?;
             let returned = events.len() as u64;
             let payload = serde_json::to_value(&events).map_err(|err| {
                 McpError::internal_error(format!("failed to serialize events: {err}"), None)
@@ -342,7 +371,7 @@ impl SentinelMcp {
         Parameters(args): Parameters<GetEventArgs>,
     ) -> Result<CallToolResult, McpError> {
         self.with_tool_metrics("get_event", 0, || async {
-            match self.state.registry.get(&args.uid).await {
+            match self.state.store.get(&args.uid).await.map_err(store_err)? {
                 Some(event) => {
                     let payload = serde_json::to_value(event).map_err(|err| {
                         McpError::internal_error(format!("failed to serialize event: {err}"), None)
@@ -359,7 +388,7 @@ impl SentinelMcp {
     }
 
     #[tool(
-        description = "Search retained cluster events with rich filters and opaque cursor pagination",
+        description = "Search retained cluster events with rich filters and keyset cursor pagination",
         output_schema = rmcp::handler::server::tool::schema_for_type::<SearchEventsOutput>(),
         annotations(
             title = "Search events",
@@ -375,14 +404,15 @@ impl SentinelMcp {
     ) -> Result<CallToolResult, McpError> {
         validate_event_types(&args.types)?;
         let limit = usize::try_from(args.limit.clamp(1, 500)).unwrap_or(50);
-        let offset = parse_cursor(args.cursor.as_deref())?;
+        let cursor = cursor_to_query_parts(args.cursor.as_deref())?;
         self.with_tool_metrics("search_events", 0, || async {
             let result = self
                 .state
-                .registry
-                .search(EventSearchQuery {
+                .store
+                .search(&EventSearchQuery {
                     limit,
-                    offset,
+                    offset: cursor.offset,
+                    after: cursor.after,
                     since: args.since,
                     until: args.until,
                     namespaces: args.namespaces,
@@ -394,19 +424,21 @@ impl SentinelMcp {
                     source_component: args.source_component,
                     message_contains: args.message_contains,
                 })
-                .await;
+                .await
+                .map_err(store_err)?;
             let returned = result.returned as u64;
-            let payload = serde_json::to_value(SearchEventsOutput {
-                events: result.events,
-                matched: result.matched,
-                returned: result.returned,
-                truncated: result.truncated,
-                next_cursor: result.next_offset.map(encode_cursor),
-                generated_at: Utc::now(),
-            })
-            .map_err(|err| {
-                McpError::internal_error(format!("failed to serialize search result: {err}"), None)
-            })?;
+            let next_cursor = result
+                .next_after
+                .as_ref()
+                .map(|(observed_at, uid)| encode_keyset_cursor(*observed_at, uid));
+            let payload = json!({
+                "events": result.events,
+                "matched": result.matched,
+                "returned": result.returned,
+                "truncated": result.truncated,
+                "next_cursor": next_cursor,
+                "generated_at": Utc::now(),
+            });
             Ok((CallToolResult::structured(payload), returned))
         })
         .await
@@ -435,7 +467,7 @@ impl SentinelMcp {
         self.with_tool_metrics("summarize_events", 0, || async {
             let groups = self
                 .state
-                .registry
+                .store
                 .summarize(
                     args.since,
                     args.until,
@@ -443,29 +475,24 @@ impl SentinelMcp {
                     &group_by,
                     limit,
                 )
-                .await;
+                .await
+                .map_err(store_err)?;
             let returned = groups.len() as u64;
-            let payload = serde_json::to_value(SummarizeEventsOutput {
-                groups: groups
-                    .into_iter()
-                    .map(|group| SummaryGroupOutput {
-                        namespace: group.key.namespace,
-                        reason: group.key.reason,
-                        involved_kind: group.key.involved_kind,
-                        event_type: group.key.event_type,
-                        event_objects: group.event_objects,
-                        occurrences: group.occurrences,
-                        first_seen: group.first_seen,
-                        last_seen: group.last_seen,
-                        affected_objects: group.affected_objects,
-                        sample_message: group.sample_message,
-                    })
-                    .collect(),
-                generated_at: Utc::now(),
-            })
-            .map_err(|err| {
-                McpError::internal_error(format!("failed to serialize summary: {err}"), None)
-            })?;
+            let payload = json!({
+                "groups": groups.iter().map(|group| json!({
+                    "namespace": group.key.namespace,
+                    "reason": group.key.reason,
+                    "involved_kind": group.key.involved_kind,
+                    "type": group.key.event_type,
+                    "event_objects": group.event_objects,
+                    "occurrences": group.occurrences,
+                    "first_seen": group.first_seen,
+                    "last_seen": group.last_seen,
+                    "affected_objects": group.affected_objects,
+                    "sample_message": group.sample_message,
+                })).collect::<Vec<_>>(),
+                "generated_at": Utc::now(),
+            });
             Ok((CallToolResult::structured(payload), returned))
         })
         .await
@@ -484,49 +511,69 @@ impl SentinelMcp {
     )]
     async fn get_metrics_summary(&self) -> Result<CallToolResult, McpError> {
         self.with_tool_metrics("get_metrics_summary", 0, || async {
-            let payload = serde_json::to_value(MetricsSummaryOutput {
-                registry_size: self.state.registry.len().await,
-                events_deduped_total: self.state.metrics.events_deduped.get(),
-                watch_restarts_total: self.state.metrics.watch_restarts.get(),
-                watch_errors_total: self.state.metrics.watch_errors.get(),
-                watch_state: self.state.watch_state.get().as_str().to_owned(),
-                events_mode: self.state.events_mode.as_str().to_owned(),
-            })
-            .map_err(|err| {
-                McpError::internal_error(
-                    format!("failed to serialize metrics summary: {err}"),
-                    None,
-                )
-            })?;
+            let store_rows = self.state.store.count().await.map_err(store_err)?;
+            let payload = json!({
+                "registry_size": self.state.registry.len().await,
+                "store_rows": store_rows,
+                "events_deduped_total": self.state.metrics.events_deduped.get(),
+                "watch_restarts_total": self.state.metrics.watch_restarts.get(),
+                "watch_errors_total": self.state.metrics.watch_errors.get(),
+                "watch_state": self.state.watch_state.get().as_str(),
+                "events_mode": self.state.events_mode.as_str(),
+                "storage_status": self.state.storage_health.status().as_str(),
+                "storage_backend": self.state.storage_health.backend().as_str(),
+                "storage_rows": self.state.metrics.storage_rows.get(),
+                "storage_bytes": self.state.metrics.storage_bytes.get(),
+                "storage_last_success_timestamp": self.state.metrics.storage_last_success_timestamp.get(),
+            });
             Ok(CallToolResult::structured(payload))
         })
         .await
     }
 
-    async fn health_output(&self) -> HealthOutput {
+    async fn health_json(&self) -> Result<serde_json::Value, McpError> {
         let snap = self.state.watch_state.snapshot();
-        let (oldest, newest) = self.state.registry.observed_bounds().await;
+        let (oldest, newest) = self
+            .state
+            .store
+            .observed_bounds()
+            .await
+            .map_err(store_err)?;
+        let store_rows = self.state.store.count().await.map_err(store_err)?;
         let uptime_seconds = (Utc::now() - snap.started_at).num_seconds().max(0);
-        HealthOutput {
-            status: snap.state.health_status().to_owned(),
-            events_mode: self.state.events_mode.as_str().to_owned(),
-            registry_size: self.state.registry.len().await,
-            watch_state: snap.state.as_str().to_owned(),
-            started_at: snap.started_at,
-            uptime_seconds,
-            last_event_at: snap.last_event_at,
-            last_watch_success_at: snap.last_watch_success_at,
-            last_watch_error_at: snap.last_watch_error_at,
-            last_error: snap.last_error,
-            consecutive_failures: snap.consecutive_failures,
-            configured_namespaces: self.state.configured_namespaces.clone(),
-            registry_capacity: self.state.registry.capacity(),
-            retention_seconds: self.state.registry.retention().as_secs(),
-            oldest_event_at: oldest,
-            newest_event_at: newest,
-            build_version: self.state.build_version.clone(),
-            git_sha: self.state.git_sha.clone(),
-        }
+        let storage = self.state.storage_health.snapshot();
+        let status = if storage.status.is_ready() {
+            snap.state.health_status()
+        } else {
+            "unhealthy"
+        };
+        Ok(json!({
+            "status": status,
+            "ready": storage.status.is_ready(),
+            "events_mode": self.state.events_mode.as_str(),
+            "registry_size": self.state.registry.len().await,
+            "store_rows": store_rows,
+            "watch_state": snap.state.as_str(),
+            "started_at": snap.started_at,
+            "uptime_seconds": uptime_seconds,
+            "last_event_at": snap.last_event_at,
+            "last_watch_success_at": snap.last_watch_success_at,
+            "last_watch_error_at": snap.last_watch_error_at,
+            "last_error": snap.last_error,
+            "consecutive_failures": snap.consecutive_failures,
+            "configured_namespaces": self.state.configured_namespaces,
+            "registry_capacity": self.state.registry.capacity(),
+            "retention_seconds": self.state.registry.retention().as_secs(),
+            "oldest_event_at": oldest,
+            "newest_event_at": newest,
+            "build_version": self.state.build_version,
+            "git_sha": self.state.git_sha,
+            "storage_status": storage.status.as_str(),
+            "storage_backend": storage.backend.as_str(),
+            "last_storage_error_at": storage.last_storage_error_at,
+            "last_storage_success_at": storage.last_storage_success_at,
+            "last_storage_error": storage.last_error,
+        }))
     }
 
     async fn with_tool_metrics<F, Fut, T>(
@@ -617,9 +664,7 @@ impl ServerHandler for SentinelMcp {
     ) -> Result<ReadResourceResponse, McpError> {
         match request.uri.as_str() {
             "clustersentinel://status" => {
-                let body = serde_json::to_string(&self.health_output().await).map_err(|err| {
-                    McpError::internal_error(format!("failed to serialize health: {err}"), None)
-                })?;
+                let body = self.health_json().await?.to_string();
                 Ok(ReadResourceResult::new(vec![ResourceContents::text(
                     body,
                     "clustersentinel://status",
@@ -629,12 +674,13 @@ impl ServerHandler for SentinelMcp {
             "clustersentinel://events/recent" => {
                 let events = self
                     .state
-                    .registry
-                    .list(EventQuery {
+                    .store
+                    .list(&EventQuery {
                         limit: 50,
                         ..EventQuery::default()
                     })
-                    .await;
+                    .await
+                    .map_err(store_err)?;
                 let body = serde_json::to_string(&events).map_err(|err| {
                     McpError::internal_error(format!("failed to serialize events: {err}"), None)
                 })?;
@@ -661,15 +707,6 @@ pub fn mcp_factory(state: AppState) -> impl Fn() -> Result<SentinelMcp, std::io:
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cursor_round_trip_is_opaque() {
-        let cursor = encode_cursor(42);
-        assert_ne!(cursor, "42");
-        assert_eq!(parse_cursor(Some(&cursor)).expect("cursor"), 42);
-        assert!(parse_cursor(Some("42")).is_err());
-        assert!(parse_cursor(Some("")).is_err());
-    }
 
     #[test]
     fn event_type_validation_is_strict() {

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title description">
+  <title id="title">Cluster Sentinel</title>
+  <desc id="description">A shield containing connected cluster nodes and an event pulse</desc>
+  <defs>
+    <linearGradient id="background" x1="64" y1="48" x2="448" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#172554"/>
+      <stop offset="0.52" stop-color="#1D4ED8"/>
+      <stop offset="1" stop-color="#0891B2"/>
+    </linearGradient>
+    <linearGradient id="shield" x1="168" y1="112" x2="344" y2="408" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#EFF6FF" stop-opacity="0.98"/>
+      <stop offset="1" stop-color="#CFFAFE" stop-opacity="0.88"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#020617" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#background)"/>
+  <circle cx="76" cy="112" r="54" fill="#38BDF8" opacity="0.12"/>
+  <circle cx="446" cy="392" r="88" fill="#2DD4BF" opacity="0.11"/>
+  <path d="M256 72 416 132v116c0 105-63 170-160 208C159 418 96 353 96 248V132L256 72Z" fill="#071A36" fill-opacity="0.55" stroke="url(#shield)" stroke-width="18" stroke-linejoin="round" filter="url(#shadow)"/>
+  <path d="M178 210 256 164l78 46v92l-78 46-78-46v-92Z" fill="none" stroke="#BAE6FD" stroke-width="12" stroke-linejoin="round" opacity="0.9"/>
+  <path d="m201 224 55 32 55-32M256 256v64" fill="none" stroke="#67E8F9" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="178" cy="210" r="22" fill="#F8FAFC" stroke="#38BDF8" stroke-width="8"/>
+  <circle cx="334" cy="210" r="22" fill="#F8FAFC" stroke="#38BDF8" stroke-width="8"/>
+  <circle cx="256" cy="348" r="22" fill="#F8FAFC" stroke="#2DD4BF" stroke-width="8"/>
+  <path d="M139 279h62l21-44 42 87 23-49h86" fill="none" stroke="#FDE68A" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="373" cy="279" r="8" fill="#FDE68A"/>
+</svg>
