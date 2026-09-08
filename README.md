@@ -2,10 +2,10 @@
 
 [![CI](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml)
 [![Docker image](https://img.shields.io/docker/v/chaser420/cluster-sentinel?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/chaser420/cluster-sentinel)
-[![Helm chart](https://img.shields.io/badge/Helm-0.9.1-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
+[![Helm chart](https://img.shields.io/badge/Helm-0.9.2-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Cluster Sentinel watches Kubernetes Events and keeps a bounded, deduplicated in-memory registry. It exposes Prometheus metrics, a read-only HTTP API, and an embedded MCP server for operators and agents.
+Cluster Sentinel watches Kubernetes Events, persists event history and watch checkpoints in SQLite, and keeps a bounded in-memory read cache. It exposes Prometheus metrics, a read-only HTTP API, and an embedded MCP server for operators and agents.
 
 The repository also ships alert rules, a Grafana dashboard, a Docker image, and a Helm chart built on [Universal Helm Chart](https://github.com/chaser100/u-helm-chart).
 
@@ -13,7 +13,8 @@ The repository also ships alert rules, a Grafana dashboard, a Docker image, and 
 
 | Endpoint | Authentication | Purpose |
 | --- | --- | --- |
-| `/health` | none | Liveness, readiness, watcher state, and build information |
+| `/health` | none | Liveness, watcher state, storage state, and build information |
+| `/ready` | none | Readiness; returns `503` while durable storage is unavailable |
 | `/metrics` | none | Prometheus metrics; keep this endpoint inside the cluster |
 | `/api/v1/events` | Bearer token | Filtered event inventory |
 | `/mcp` | Bearer token | Streamable HTTP MCP server |
@@ -53,7 +54,7 @@ See [MCP configuration](docs/mcp.md) for client examples and [architecture](docs
 Release images are published to Docker Hub with the same version as the Helm chart:
 
 ```bash
-docker pull chaser420/cluster-sentinel:0.9.1
+docker pull chaser420/cluster-sentinel:0.9.2
 ```
 
 Run the demo image locally:
@@ -63,7 +64,7 @@ docker run --rm \
   --publish 8080:8080 \
   --env CLUSTERSENTINEL_EVENTS_MODE=demo \
   --env CLUSTERSENTINEL_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
-  chaser420/cluster-sentinel:0.9.1
+  chaser420/cluster-sentinel:0.9.2
 ```
 
 ## Helm installation
@@ -75,18 +76,18 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --namespace clustersentinel \
   --create-namespace
 ```
 
-The default installation creates one replica, a ClusterIP Service, read-only cluster RBAC, a Grafana dashboard `ConfigMap`, and a retained Secret with a generated MCP token. The application runs as UID `65532` with a read-only root filesystem and all Linux capabilities dropped.
+The default installation creates one replica, a 5 GiB `ReadWriteOnce` PVC, a ClusterIP Service, read-only cluster RBAC, a Grafana dashboard `ConfigMap`, and a retained Secret with a generated MCP token. The application runs as UID `65532` with a read-only root filesystem and all Linux capabilities dropped.
 
 Prometheus Operator resources are opt-in because their CRDs are not present in every cluster:
 
 ```bash
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.1 \
+  --version 0.9.2 \
   --namespace clustersentinel \
   --create-namespace \
   --set clustersentinel.serviceMonitor.enabled=true \
@@ -136,7 +137,7 @@ echo
 | `clustersentinel.fullnameOverride` | `clustersentinel` | Keeps Deployment, Service, and ServiceAccount names stable. |
 | `clustersentinel.replicaCount` | `1` | Number of application pods. Keep one replica while MCP sessions are stored in memory. |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository. |
-| `clustersentinel.imageTag` | `0.9.1` | Container image version. Release tags, chart versions, and this value must match. |
+| `clustersentinel.imageTag` | `0.9.2` | Container image version. Release tags, chart versions, and this value must match. |
 | `clustersentinel.imagePullPolicy` | `IfNotPresent` | Kubernetes image pull policy. |
 | `clustersentinel.imagePullSecrets` | `[]` | Secret references required by a private container registry. Each item uses the form `name: secret-name`. |
 | `clustersentinel.service.name` | `http` | Service port name used by probes and ServiceMonitor. |
@@ -145,7 +146,9 @@ echo
 | `clustersentinel.service.protocol` | `TCP` | Service port protocol. |
 | `clustersentinel.route.enabled` | `false` | Creates a Gateway API HTTPRoute through the Universal Helm Chart. |
 | `clustersentinel.route.spec` | not set | HTTPRoute specification, including `parentRefs`, `hostnames`, rules, and backends. |
-| `clustersentinel.readinessProbe` | `/health` | Controls when Kubernetes sends traffic to the pod. |
+| `clustersentinel.deploymentStrategy.type` | `Recreate` | Stops the old pod before starting the replacement so one SQLite database is never opened by two pods. |
+| `clustersentinel.persistentVolumeClaims` | `clustersentinel-data`, `5Gi`, `ReadWriteOnce` | Creates and mounts the SQLite data volume at `/var/lib/clustersentinel`. An empty `storageClassName` uses the cluster default. |
+| `clustersentinel.readinessProbe` | `/ready` | Removes the pod from Service endpoints when durable storage is unavailable. |
 | `clustersentinel.livenessProbe` | `/health` | Restarts the container when the HTTP server stops responding. |
 | `clustersentinel.resources.requests` | `50m`, `128Mi` | CPU and memory reserved for each pod. |
 | `clustersentinel.resources.limits` | `500m`, `512Mi` | Maximum CPU and memory available to each pod. |
@@ -155,11 +158,50 @@ echo
 | `clustersentinel.serviceMonitor.enabled` | `false` | Creates a ServiceMonitor. The Prometheus Operator CRDs must already exist. |
 | `clustersentinel.serviceMonitor.endpoints` | `/metrics`, `30s` | Configures the metrics path, scrape interval, and timeout. |
 | `clustersentinel.securityContext` | restricted | Runs the container without privilege escalation, capabilities, or a writable root filesystem. |
-| `clustersentinel.podSecurityContext` | `RuntimeDefault` seccomp | Applies the default container runtime syscall profile. |
+| `clustersentinel.podSecurityContext` | `fsGroup: 65532`, `RuntimeDefault` seccomp | Makes the mounted PVC writable by the non-root process and applies the default runtime syscall profile. |
 | `clustersentinel.envSecrets` | MCP token reference | Maps Secret keys to container environment variables. |
 | `clustersentinel.env` | runtime defaults | Supplies non-secret application environment variables. |
 
 Other values supported by the dependency can also be placed under `clustersentinel`. See the [Universal Helm Chart values](https://github.com/chaser100/u-helm-chart/tree/main/helm-charts/application) for Ingress, autoscaling, volumes, extra containers, annotations, and scheduling options.
+
+### Persistent event storage
+
+Version `0.9.2` stores event history and Kubernetes watch checkpoints in SQLite. The default chart creates `PersistentVolumeClaim/clustersentinel-data`, mounts it at `/var/lib/clustersentinel`, and writes `/var/lib/clustersentinel/events.db`. The PVC uses the cluster's default StorageClass unless `storageClassName` is set explicitly.
+
+```yaml
+clustersentinel:
+  persistentVolumeClaims:
+    - name: clustersentinel-data
+      size: 20Gi
+      storageClassName: fast-ssd
+      accessModes:
+        - ReadWriteOnce
+      mountPath: /var/lib/clustersentinel
+      readOnly: false
+  env:
+    - name: CLUSTERSENTINEL_STORAGE_PATH
+      value: /var/lib/clustersentinel/events.db
+    - name: CLUSTERSENTINEL_CLUSTER_ID
+      value: production-eu-1
+    - name: CLUSTERSENTINEL_STORAGE_RETENTION_SECS
+      value: "1209600"
+    - name: CLUSTERSENTINEL_STORAGE_MAX_EVENTS
+      value: "500000"
+```
+
+Keep `replicaCount: 1` and `deploymentStrategy.type: Recreate`. SQLite and the default `ReadWriteOnce` claim are not a shared multi-writer backend. Back up the PVC before destructive storage changes. The default claim carries Helm `keep` and Argo CD `Prune=false` annotations, so removing the release does not erase event history automatically; delete the PVC explicitly when the data is no longer needed.
+
+To run without durable storage, replace the complete `clustersentinel.persistentVolumeClaims` and `clustersentinel.env` arrays:
+
+```yaml
+clustersentinel:
+  persistentVolumeClaims: []
+  env:
+    - name: CLUSTERSENTINEL_STORAGE_PATH
+      value: memory
+```
+
+This mode loses all events and checkpoints when the pod restarts. During an upgrade from `0.9.1`, Helm creates the PVC before the `0.9.2` pod starts; there is no older on-disk schema to migrate.
 
 ### Runtime environment variables
 
@@ -175,8 +217,14 @@ Other values supported by the dependency can also be placed under `clustersentin
 | `CLUSTERSENTINEL_DEDUP_TTL_SECS` | `3600` | Time an inactive event remains in the in-memory registry. |
 | `CLUSTERSENTINEL_METRICS_EVENT_LIMIT` | `500` | Maximum number of retained events exported as per-event inventory gauges on `/metrics`. Lower it to reduce Prometheus cardinality. |
 | `CLUSTERSENTINEL_NAMESPACES` | all namespaces | Comma-separated namespace allow-list, for example `default,kube-system`. An empty value watches the whole cluster. |
-| `CLUSTERSENTINEL_MCP_ALLOWED_HOSTS` | `localhost,127.0.0.1,::1,clustersentinel` | Comma-separated `Host` and `:authority` allow-list used by MCP DNS-rebinding protection. Add Service DNS names and external hostnames used by clients. |
+| `CLUSTERSENTINEL_MCP_ALLOWED_HOSTS` | loopback, `clustersentinel`, and standard Service DNS forms | Comma-separated `Host` and `:authority` allow-list used by MCP DNS-rebinding protection. Add namespace-qualified Service DNS names and external hostnames used by clients. |
 | `CLUSTERSENTINEL_MCP_AUTH_TOKEN` | no default | Bearer token required by `/mcp` and `/api/v1/events`. The default chart obtains it from the MCP Secret. |
+| `CLUSTERSENTINEL_STORAGE_PATH` | `/var/lib/clustersentinel/events.db` in Kubernetes; memory in demo mode | SQLite database path. Use `memory` or `:memory:` to disable file-backed persistence. |
+| `CLUSTERSENTINEL_CLUSTER_ID` | `default` | Logical cluster identifier stored with every event and watch checkpoint. Use a stable, unique value when a database is restored or shared across cluster identities. |
+| `CLUSTERSENTINEL_STORAGE_RETENTION_SECS` | `604800` | Maximum event age before batched pruning; default is seven days. |
+| `CLUSTERSENTINEL_STORAGE_MAX_EVENTS` | `250000` | Maximum durable event rows retained after pruning. |
+| `CLUSTERSENTINEL_STORAGE_PRUNE_BATCH` | `1000` | Maximum rows removed per transaction during startup and five-minute periodic pruning. |
+| `CLUSTERSENTINEL_WRITER_QUEUE_CAPACITY` | `64` | Bounded persistence queue capacity; producers wait when the queue is full. |
 | `CLUSTERSENTINEL_BUILD_VERSION` | crate version | Version returned in health output and MCP server information. Release images set it during the Docker build. |
 | `CLUSTERSENTINEL_GIT_SHA` | `unknown` | Git revision returned by the health endpoint. Release images set it during the Docker build. |
 | `RUST_LOG` | `info` in chart values | Tracing filter. Examples: `debug` or `info,clustersentinel::mcp=debug`. |
@@ -242,13 +290,13 @@ helm template clustersentinel deploy/helm/clustersentinel \
   --values deploy/helm/clustersentinel/tests/values-observability.yaml
 
 helm package deploy/helm/clustersentinel --destination /tmp
-helm template clustersentinel /tmp/clustersentinel-0.9.1.tgz \
+helm template clustersentinel /tmp/clustersentinel-0.9.2.tgz \
   --namespace clustersentinel
 ```
 
 ### Bundled dependency
 
-The upstream `application:0.3.9` chart is committed unchanged under `deploy/helm/clustersentinel/charts/application/`. Both a fresh checkout and the published archive can be rendered without downloading that dependency. `Chart.yaml` retains the upstream URL and alias `clustersentinel`; `Chart.lock` records the dependency version.
+The upstream `application:0.4.1` chart is committed under `deploy/helm/clustersentinel/charts/application/`. Both a fresh checkout and the published archive can be rendered without downloading that dependency. `Chart.yaml` retains the upstream URL and alias `clustersentinel`; `Chart.lock` records the dependency version.
 
 Dependency updates are deliberate release changes. Download the chosen upstream release into a temporary directory, verify its archive digest against the upstream repository index, and replace the complete `charts/application/` directory with its extracted contents. Update the dependency declaration and regenerate `Chart.lock` in a temporary working copy. Commit the directory and lock file together, review the upstream changes, and bump the Cluster Sentinel release version. Do not leave an additional `application-*.tgz` in `charts/` alongside the extracted chart.
 
@@ -267,17 +315,17 @@ Application and chart versions move together. Before creating a release, update 
 - Root and chart `README.md`: installation examples and displayed version
 - `CHANGELOG.md`: release notes
 
-Use this order: **feature branch → pull request → main → successful main CI → tag**. For the uncommitted `0.9.1` changes, create the feature branch before committing:
+Use this order: **feature branch → pull request → main → successful main CI → tag**. For the uncommitted `0.9.2` changes, create the feature branch before committing:
 
 ```bash
-git switch -c feature/release-0.9.1
+git switch -c feature/release-0.9.2
 git add -A
 git diff --cached --stat
 git diff --cached
-git commit -m "Prepare Cluster Sentinel 0.9.1"
-git push -u origin feature/release-0.9.1
-gh pr create --base main --head feature/release-0.9.1 \
-  --title "Release 0.9.1" --body "Bundle the Helm dependency and move CI/release to the Kubernetes runner."
+git commit -m "Prepare Cluster Sentinel 0.9.2"
+git push -u origin feature/release-0.9.2
+gh pr create --base main --head feature/release-0.9.2 \
+  --title "Release 0.9.2" --body "Add durable event storage and update the bundled Universal Helm Chart dependency."
 gh pr checks --watch
 ```
 
@@ -297,15 +345,15 @@ test "$(git branch --show-current)" = main
 test -z "$(git status --porcelain)"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-git tag -a v0.9.1 -m "Cluster Sentinel 0.9.1"
-git push origin v0.9.1
+git tag -a v0.9.2 -m "Cluster Sentinel 0.9.2"
+git push origin v0.9.2
 ```
 
 Stop if any command fails. Do not tag the feature branch. Release validation rejects a commit outside `main` or without a successful push CI run for that exact commit on `main`.
 
 All CI and release jobs use the ephemeral ARC scale set `cluster-sentinel-k8s`, with one job at a time and no fallback to GitHub-hosted runners. The runner must provide Rust `1.89.0` with Clippy/rustfmt, Git, curl, jq, GitHub CLI, Docker and Buildx. Each job gets a new pod; Helm is installed by the workflow. If the cluster is unavailable, jobs wait in the queue.
 
-The release workflow builds `linux/amd64` and `linux/arm64` images, pushes `0.9.1` and `latest` to Docker Hub, and checks that both platforms are present. Cargo uses one build job, including inside the Dockerfile. Container builds default to `CARGO_PROFILE_RELEASE_LTO=thin`: full LTO exceeded the builder memory limit during local validation. Both CI and release use `.github/buildkitd.toml` to limit BuildKit parallelism to one; the builder container is capped at 1536 MiB memory, without extra swap, and two CPUs. These limits leave space within the 2 GiB DinD sidecar, but a full multiarch build still needs verification on the runner. Image publication has a 180-minute timeout. Only after it succeeds does the workflow validate and package the chart, create a GitHub Release, and attach the chart and SHA-256 checksum. Do not create a second release manually with `gh release create`.
+The release workflow builds `linux/amd64` and `linux/arm64` images, pushes `0.9.2` and `latest` to Docker Hub, and checks that both platforms are present. Cargo uses one build job, including inside the Dockerfile. Container builds default to `CARGO_PROFILE_RELEASE_LTO=thin`: full LTO exceeded the builder memory limit during local validation. Both CI and release use `.github/buildkitd.toml` to limit BuildKit parallelism to one; the builder container is capped at 1536 MiB memory, without extra swap, and two CPUs. These limits leave space within the 2 GiB DinD sidecar, but a full multiarch build still needs verification on the runner. Image publication has a 180-minute timeout. Only after it succeeds does the workflow validate and package the chart, create a GitHub Release, and attach the chart and SHA-256 checksum. Do not create a second release manually with `gh release create`.
 
 The local amd64 build with ThinLTO passed under these resource limits. Builder settings use the existing SHA-pinned [docker/setup-buildx-action v4.3.0](https://github.com/docker/setup-buildx-action/tree/37fe631027851001ddb9b187196cc803df7f5f0e) and its documented [resource limits](https://docs.docker.com/build/builders/drivers/docker-container/). The existing [docker/setup-qemu-action v4.3.0](https://github.com/docker/setup-qemu-action/tree/1f40c72289eff860ee54a304f1438e3cff362e0a) installs only the arm64 emulator (sources verified 2026-09-07).
 
@@ -321,7 +369,7 @@ Configure the repository before the first tag:
 
 If Pages rejects a release because of environment protection rules, add the tag rule and rerun the failed deployment job. If the `github-pages` artifact has expired, rerun `Build Helm repository` and its dependent deployment job to generate a fresh artifact.
 
-The chart is registered in Artifact Hub from `https://chaser100.github.io/cluster-sentinel`. The repository ID `fd95efee-b435-4990-9f37-529a4ff5dba1` is stored in `docs/artifacthub-repo.yml` for the Verified publisher check. The `Helm Repository` workflow publishes metadata changes from `main` without rebuilding the application image or creating another release. Artifact Hub applies the badge when it processes an index that serves this metadata file.
+The chart is registered in Artifact Hub from `https://chaser100.github.io/cluster-sentinel`. The repository ID `fd95efee-b435-4990-9f37-529a4ff5dba1` is stored in `docs/artifacthub-repo.yml` for the Verified publisher check. Artifact Hub renders the package description from `deploy/helm/clustersentinel/README.md`; the chart `icon` points to `docs/logo.svg`, published as `/logo.svg` on Pages. The `Helm Repository` workflow publishes Pages metadata and visual assets from `main` without rebuilding the application image or creating another release. Artifact Hub applies updates after it processes a changed repository index.
 
 ## License
 

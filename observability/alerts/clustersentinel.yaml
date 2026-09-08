@@ -1,4 +1,5 @@
 # ClusterSentinel Prometheus alert rules
+
 groups:
   - name: clustersentinel
     rules:
@@ -13,6 +14,7 @@ groups:
           description: >-
             clustersentinel_watch_errors_total increased by {{ $value }} over 15m.
             Check apiserver RBAC and API connectivity.
+
       - alert: ClusterSentinelWatchRestarts
         expr: increase(clustersentinel_watch_restarts_total[15m]) > 20
         for: 10m
@@ -24,6 +26,7 @@ groups:
           description: >-
             Watch restarted {{ $value }} times in 15m. Investigate stream timeouts
             and apiserver load.
+
       - alert: ClusterSentinelRegistryEmpty
         expr: clustersentinel_events_registry_size == 0
         for: 30m
@@ -35,3 +38,63 @@ groups:
           description: >-
             No events retained for 30m. Expected in idle clusters; verify mode
             is kubernetes (not stuck) if activity is expected.
+
+      - alert: ClusterSentinelStorageWriteErrors
+        expr: increase(clustersentinel_storage_errors_total[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel durable storage write errors
+          description: >-
+            Storage errors increased by {{ $value }} over 10m. Check SQLite PVC,
+            disk pressure, and /ready storage_status.
+
+      - alert: ClusterSentinelStorageWritesStalled
+        expr: |
+          (
+            max(clustersentinel_watch_checkpoint_age_seconds) > 600
+          )
+          and
+          (
+            increase(clustersentinel_storage_writes_total{result="ok"}[15m]) == 0
+          )
+        for: 10m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel storage writes stalled while watch is active
+          description: >-
+            No successful storage writes for 15m while checkpoint age is >10m.
+            Investigate writer backlog, SQLite lock contention, or PVC issues.
+
+      - alert: ClusterSentinelStorageCheckpointStale
+        expr: max by (scope) (clustersentinel_watch_checkpoint_age_seconds) > 1800
+        for: 10m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel watch checkpoint is stale
+          description: >-
+            Checkpoint age for scope {{ $labels.scope }} is {{ $value }}s.
+            Expect watch resume gaps after restart until a fresh checkpoint commits.
+
+      - alert: ClusterSentinelStoragePvcHighUsage
+        expr: |
+          (
+            kubelet_volume_stats_used_bytes{persistentvolumeclaim=~".*clustersentinel.*"}
+            /
+            kubelet_volume_stats_capacity_bytes{persistentvolumeclaim=~".*clustersentinel.*"}
+          ) > 0.8
+        for: 15m
+        labels:
+          severity: warning
+          app: clustersentinel
+        annotations:
+          summary: ClusterSentinel PVC usage above 80%
+          description: >-
+            PVC {{ $labels.persistentvolumeclaim }} is {{ $value | humanizePercentage }} full.
+            Increase capacity or tighten retention/max-events.

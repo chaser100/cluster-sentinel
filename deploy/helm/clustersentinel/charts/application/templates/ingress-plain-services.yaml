@@ -30,6 +30,9 @@ spec:
       port: {{ default $p.backend.service.port $p.service.port }}
       targetPort: {{ default (default $p.backend.service.targetPort $p.service.targetPort) (default $p.backend.service.port $p.service.port) }}
       protocol: {{ default "TCP" $p.service.protocol }}
+      {{- with $p.service.appProtocol }}
+      appProtocol: {{ . }}
+      {{- end }}
 ---
       {{- end }}
     {{- end }}

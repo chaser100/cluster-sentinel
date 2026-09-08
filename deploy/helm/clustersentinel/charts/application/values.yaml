@@ -60,6 +60,7 @@ service:
   name: http
   type: ClusterIP
   port: 80
+  appProtocol: ""
   protocol: TCP
 
 serviceMonitor:
@@ -480,6 +481,7 @@ ingressPlain:
 #                selector:
 #                  app: users
 #                port: 8080
+#                appProtocol: grpc
 #
 #            - path: /orders
 #              backend:

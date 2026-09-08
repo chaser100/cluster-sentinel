@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clustersentinel::config::Config;
-use clustersentinel::events::{EventRegistry, WatchStateHandle, run_event_pipeline};
+use clustersentinel::events::{
+    EventRegistry, EventStoreHandle, StorageBackend, StorageHealthHandle, WatchStateHandle,
+    run_event_pipeline, spawn_durable_writer,
+};
 use clustersentinel::http::{HttpState, router};
 use clustersentinel::mcp::{AppState, SentinelMcp};
 use clustersentinel::metrics::Metrics;
@@ -24,14 +27,71 @@ async fn main() -> Result<()> {
     let metrics = Metrics::try_new().context("failed to initialize metrics")?;
     let registry = EventRegistry::new(config.registry_capacity, config.dedup_ttl);
     let watch_state = WatchStateHandle::new();
+    let storage_backend = if config.storage_path.is_some() {
+        StorageBackend::Sqlite
+    } else {
+        StorageBackend::Memory
+    };
+    let storage_health = StorageHealthHandle::new(storage_backend);
     let cancel = CancellationToken::new();
+
+    let store = match &config.storage_path {
+        Some(path) => {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent).with_context(|| {
+                    format!("failed to create storage directory {}", parent.display())
+                })?;
+            }
+            match EventStoreHandle::open(path, config.cluster_id.clone()) {
+                Ok(store) => {
+                    storage_health.mark_ready();
+                    metrics.observe_storage_op("open", 0.0, true);
+                    if let Ok(stats) = store.stats().await {
+                        metrics.set_storage_stats(stats.rows, stats.bytes);
+                    }
+                    store
+                }
+                Err(err) => {
+                    metrics.observe_storage_op("open", 0.0, false);
+                    storage_health.note_error(&err.to_string());
+                    return Err(err).with_context(|| {
+                        format!("failed to open durable store at {}", path.display())
+                    });
+                }
+            }
+        }
+        None => match EventStoreHandle::open_in_memory(config.cluster_id.clone()) {
+            Ok(store) => {
+                storage_health.mark_ready();
+                metrics.observe_storage_op("open", 0.0, true);
+                store
+            }
+            Err(err) => {
+                metrics.observe_storage_op("open", 0.0, false);
+                storage_health.note_error(&err.to_string());
+                return Err(err).context("failed to open in-memory durable store");
+            }
+        },
+    };
+    let (writer, writer_task) = spawn_durable_writer(
+        store.shared(),
+        config.writer_queue_capacity,
+        cancel.child_token(),
+        metrics.clone(),
+        storage_health.clone(),
+    );
 
     if env::args().any(|arg| arg == "--mcp-stdio") {
         info!("starting MCP stdio transport (Bearer auth not required on stdio)");
         let server = SentinelMcp::new(AppState {
             registry,
+            store,
             metrics,
             watch_state,
+            storage_health,
             events_mode: config.events_mode,
             configured_namespaces: config.namespaces.clone(),
             build_version: env::var("CLUSTERSENTINEL_BUILD_VERSION")
@@ -46,6 +106,8 @@ async fn main() -> Result<()> {
             .waiting()
             .await
             .context("MCP stdio session failed")?;
+        cancel.cancel();
+        let _ = writer_task.await;
         return Ok(());
     }
 
@@ -63,10 +125,12 @@ async fn main() -> Result<()> {
     let pipeline_metrics = metrics.clone();
     let pipeline_watch = watch_state.clone();
     let pipeline_config = config.clone();
+    let pipeline_writer = writer.clone();
     let pipeline_task = tokio::spawn(async move {
         run_event_pipeline(
             pipeline_config,
             pipeline_registry,
+            pipeline_writer,
             pipeline_metrics,
             pipeline_watch,
             pipeline_cancel,
@@ -77,8 +141,10 @@ async fn main() -> Result<()> {
     let app = router(
         HttpState {
             registry,
+            store,
             metrics,
             watch_state,
+            storage_health,
             events_mode: config.events_mode,
             mcp_allowed_hosts: config.mcp_allowed_hosts.clone(),
             mcp_auth_token,
@@ -110,6 +176,9 @@ async fn main() -> Result<()> {
 
     if let Err(err) = pipeline_task.await {
         warn!(error = %err, "event pipeline task join failed");
+    }
+    if let Err(err) = writer_task.await {
+        warn!(error = %err, "durable writer task join failed");
     }
 
     Ok(())

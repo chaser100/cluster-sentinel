@@ -202,6 +202,11 @@
             "SCTP"
           ],
           "default": "TCP"
+        },
+        "appProtocol": {
+          "description": "Optional application protocol hint for the chart-managed Service port.",
+          "type": "string",
+          "default": ""
         }
       }
     },
@@ -619,7 +624,38 @@
           "type": "array",
           "items": {
             "type": "object",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "properties": {
+              "rules": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "paths": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "properties": {
+                          "service": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "properties": {
+                              "appProtocol": {
+                                "description": "Application protocol hint for the Service port created for this path.",
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }

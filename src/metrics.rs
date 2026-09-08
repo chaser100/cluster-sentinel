@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use prometheus::{
-    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, Opts, Registry,
-    TextEncoder, opts,
+    Encoder, HistogramOpts, HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Opts,
+    Registry, TextEncoder, opts,
 };
 
 use crate::error::{AppError, AppResult};
@@ -27,6 +27,11 @@ pub const DEFAULT_METRICS_EVENT_LIMIT: usize = 500;
 /// Max characters kept in the Prometheus `message` label.
 pub const EVENT_MESSAGE_LABEL_MAX: usize = 256;
 
+/// Low-cardinality `result` labels for `clustersentinel_storage_writes_total`.
+pub const STORAGE_WRITE_RESULTS: [&str; 3] = ["ok", "error", "deduped"];
+/// Low-cardinality `operation` labels for storage error/latency series.
+pub const STORAGE_OPERATIONS: [&str; 4] = ["upsert", "checkpoint", "prune", "open"];
+
 /// Shared metrics handles.
 #[derive(Clone, Debug)]
 pub struct Metrics {
@@ -42,6 +47,14 @@ pub struct Metrics {
     pub mcp_auth_failures: IntCounter,
     pub mcp_active_sessions: IntGauge,
     pub mcp_events_returned: IntCounterVec,
+    pub storage_writes: IntCounterVec,
+    pub storage_write_duration: HistogramVec,
+    pub storage_errors: IntCounterVec,
+    pub storage_rows: IntGauge,
+    pub storage_bytes: IntGauge,
+    pub storage_pruned: IntCounterVec,
+    pub storage_last_success_timestamp: IntGauge,
+    pub watch_checkpoint_age_seconds: IntGaugeVec,
 }
 
 impl Metrics {
@@ -136,6 +149,83 @@ impl Metrics {
         )
         .map_err(metric_err)?;
 
+        let storage_writes = IntCounterVec::new(
+            Opts::new(
+                "clustersentinel_storage_writes_total",
+                "Durable storage write attempts by result",
+            ),
+            &["result"],
+        )
+        .map_err(metric_err)?;
+
+        let storage_write_duration = HistogramVec::new(
+            HistogramOpts::new(
+                "clustersentinel_storage_write_duration_seconds",
+                "Durable storage operation latency in seconds",
+            )
+            .buckets(vec![
+                0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0,
+            ]),
+            &["operation"],
+        )
+        .map_err(metric_err)?;
+
+        let storage_errors = IntCounterVec::new(
+            Opts::new(
+                "clustersentinel_storage_errors_total",
+                "Durable storage errors by operation",
+            ),
+            &["operation"],
+        )
+        .map_err(metric_err)?;
+
+        let storage_rows = IntGauge::with_opts(Opts::new(
+            "clustersentinel_storage_rows",
+            "Number of durable event rows in SQLite",
+        ))
+        .map_err(metric_err)?;
+
+        let storage_bytes = IntGauge::with_opts(Opts::new(
+            "clustersentinel_storage_bytes",
+            "Approximate SQLite database size in bytes (page_count * page_size)",
+        ))
+        .map_err(metric_err)?;
+
+        let storage_pruned = IntCounterVec::new(
+            Opts::new(
+                "clustersentinel_storage_pruned_total",
+                "Durable rows pruned by retention policy",
+            ),
+            &["reason"],
+        )
+        .map_err(metric_err)?;
+
+        let storage_last_success_timestamp = IntGauge::with_opts(Opts::new(
+            "clustersentinel_storage_last_success_timestamp",
+            "Unix timestamp of the last successful durable storage write",
+        ))
+        .map_err(metric_err)?;
+
+        let watch_checkpoint_age_seconds = IntGaugeVec::new(
+            Opts::new(
+                "clustersentinel_watch_checkpoint_age_seconds",
+                "Age in seconds of the last committed watch checkpoint per scope",
+            ),
+            &["scope"],
+        )
+        .map_err(metric_err)?;
+
+        // Pre-register low-cardinality label sets so cardinality stays stable.
+        for result in STORAGE_WRITE_RESULTS {
+            let _ = storage_writes.with_label_values(&[result]);
+        }
+        for operation in STORAGE_OPERATIONS {
+            let _ = storage_write_duration.with_label_values(&[operation]);
+            let _ = storage_errors.with_label_values(&[operation]);
+        }
+        let _ = storage_pruned.with_label_values(&["age"]);
+        let _ = storage_pruned.with_label_values(&["overflow"]);
+
         registry
             .register(Box::new(events_registered.clone()))
             .map_err(metric_err)?;
@@ -169,6 +259,30 @@ impl Metrics {
         registry
             .register(Box::new(mcp_events_returned.clone()))
             .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_writes.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_write_duration.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_errors.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_rows.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_bytes.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_pruned.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(storage_last_success_timestamp.clone()))
+            .map_err(metric_err)?;
+        registry
+            .register(Box::new(watch_checkpoint_age_seconds.clone()))
+            .map_err(metric_err)?;
 
         Ok(Self {
             registry,
@@ -183,6 +297,14 @@ impl Metrics {
             mcp_auth_failures,
             mcp_active_sessions,
             mcp_events_returned,
+            storage_writes,
+            storage_write_duration,
+            storage_errors,
+            storage_rows,
+            storage_bytes,
+            storage_pruned,
+            storage_last_success_timestamp,
+            watch_checkpoint_age_seconds,
         })
     }
 
@@ -247,6 +369,73 @@ impl Metrics {
         self.events_registered
             .with_label_values(&[event_type, reason, namespace, involved_kind, source])
             .inc();
+    }
+
+    /// Observe one durable storage operation (latency + result/error counters).
+    pub fn observe_storage_op(&self, operation: &str, duration_secs: f64, success: bool) {
+        let operation = label_or_none(operation);
+        self.storage_write_duration
+            .with_label_values(&[operation])
+            .observe(duration_secs);
+        if success {
+            self.storage_writes.with_label_values(&["ok"]).inc();
+            self.storage_last_success_timestamp
+                .set(chrono::Utc::now().timestamp());
+        } else {
+            self.storage_writes.with_label_values(&["error"]).inc();
+            self.storage_errors.with_label_values(&[operation]).inc();
+        }
+    }
+
+    /// Observe an upsert outcome that did not fail (ok or deduped).
+    pub fn observe_storage_upsert_ok(&self, duration_secs: f64, deduped: bool) {
+        self.storage_write_duration
+            .with_label_values(&["upsert"])
+            .observe(duration_secs);
+        if deduped {
+            self.storage_writes.with_label_values(&["deduped"]).inc();
+        } else {
+            self.storage_writes.with_label_values(&["ok"]).inc();
+        }
+        self.storage_last_success_timestamp
+            .set(chrono::Utc::now().timestamp());
+    }
+
+    /// Refresh size gauges from a store stats snapshot.
+    pub fn set_storage_stats(&self, rows: usize, bytes: u64) {
+        self.storage_rows
+            .set(i64::try_from(rows).unwrap_or(i64::MAX));
+        self.storage_bytes
+            .set(i64::try_from(bytes).unwrap_or(i64::MAX));
+    }
+
+    /// Increment prune counters and refresh size gauges.
+    pub fn observe_prune(&self, age: usize, overflow: usize, rows: usize, bytes: u64) {
+        if age > 0 {
+            self.storage_pruned
+                .with_label_values(&["age"])
+                .inc_by(u64::try_from(age).unwrap_or(u64::MAX));
+        }
+        if overflow > 0 {
+            self.storage_pruned
+                .with_label_values(&["overflow"])
+                .inc_by(u64::try_from(overflow).unwrap_or(u64::MAX));
+        }
+        self.set_storage_stats(rows, bytes);
+    }
+
+    /// Set checkpoint age gauges from known scope timestamps.
+    pub fn set_checkpoint_ages(
+        &self,
+        checkpoints: &std::collections::HashMap<String, chrono::DateTime<chrono::Utc>>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) {
+        for (scope, updated_at) in checkpoints {
+            let age = (now - *updated_at).num_seconds().max(0);
+            self.watch_checkpoint_age_seconds
+                .with_label_values(&[label_or_none(scope)])
+                .set(age);
+        }
     }
 }
 
@@ -440,5 +629,43 @@ mod tests {
         assert_eq!(truncated.chars().count(), 16);
         assert!(truncated.ends_with('…'));
         assert_eq!(escape_prom_label("a\"b\\c\nd"), "a\\\"b\\\\c\\nd");
+    }
+
+    #[test]
+    fn storage_metrics_keep_stable_low_cardinality_labels() {
+        let metrics = Metrics::try_new().expect("metrics");
+        metrics.observe_storage_upsert_ok(0.01, false);
+        metrics.observe_storage_upsert_ok(0.02, true);
+        metrics.observe_storage_op("upsert", 0.03, false);
+        metrics.observe_prune(2, 1, 10, 4096);
+        metrics.set_checkpoint_ages(
+            &std::collections::HashMap::from([(
+                "all".to_owned(),
+                chrono::Utc::now() - chrono::Duration::seconds(42),
+            )]),
+            chrono::Utc::now(),
+        );
+        let text = metrics.gather_text().expect("encode");
+        for needle in [
+            "clustersentinel_storage_writes_total{result=\"ok\"}",
+            "clustersentinel_storage_writes_total{result=\"deduped\"}",
+            "clustersentinel_storage_writes_total{result=\"error\"}",
+            "clustersentinel_storage_errors_total{operation=\"upsert\"}",
+            "clustersentinel_storage_pruned_total{reason=\"age\"}",
+            "clustersentinel_storage_pruned_total{reason=\"overflow\"}",
+            "clustersentinel_storage_rows",
+            "clustersentinel_storage_bytes",
+            "clustersentinel_storage_last_success_timestamp",
+            "clustersentinel_watch_checkpoint_age_seconds{scope=\"all\"}",
+            "clustersentinel_storage_write_duration_seconds_bucket{operation=\"upsert\"",
+        ] {
+            assert!(text.contains(needle), "missing {needle} in:\n{text}");
+        }
+        // Cardinality guard: only the three declared result labels appear.
+        let result_series = text
+            .lines()
+            .filter(|l| l.starts_with("clustersentinel_storage_writes_total{"))
+            .count();
+        assert_eq!(result_series, 3, "unexpected write result cardinality");
     }
 }

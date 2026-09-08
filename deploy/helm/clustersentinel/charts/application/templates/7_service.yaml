@@ -11,6 +11,9 @@ spec:
     - port: {{ .Values.service.port }}
       targetPort: {{ default .Values.service.name .Values.service.targetPort }}
       protocol: TCP
+      {{- with .Values.service.appProtocol }}
+      appProtocol: {{ . }}
+      {{- end }}
       name: {{ .Values.service.name }}
   selector:
     {{- include "application.selectorLabels" . | nindent 4 }}

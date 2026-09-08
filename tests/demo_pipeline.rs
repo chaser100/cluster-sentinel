@@ -7,8 +7,9 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clustersentinel::config::EventsMode;
 use clustersentinel::events::{
-    EventQuery, EventRegistry, WatchResumeAction, WatchStateHandle, classify_watch_error,
-    next_backoff, run_event_pipeline,
+    EventQuery, EventRegistry, EventStoreHandle, StorageBackend, StorageHealthHandle,
+    WatchResumeAction, WatchStateHandle, classify_watch_error, next_backoff, run_event_pipeline,
+    spawn_durable_writer,
 };
 use clustersentinel::http::{HttpState, router};
 use clustersentinel::metrics::Metrics;
@@ -21,15 +22,28 @@ use tower::ServiceExt;
 
 const TEST_MCP_TOKEN: &str = "test-mcp-bearer-token-dev-275";
 
+fn test_store() -> EventStoreHandle {
+    EventStoreHandle::open_in_memory("default").expect("in-memory store")
+}
+
+fn test_storage_health() -> StorageHealthHandle {
+    let health = StorageHealthHandle::new(StorageBackend::Memory);
+    health.mark_ready();
+    health
+}
+
 fn test_http_state(
     registry: EventRegistry,
+    store: EventStoreHandle,
     metrics: Metrics,
     watch_state: WatchStateHandle,
 ) -> HttpState {
     HttpState {
         registry,
+        store,
         metrics,
         watch_state,
+        storage_health: test_storage_health(),
         events_mode: EventsMode::Demo,
         mcp_allowed_hosts: vec!["localhost".into(), "127.0.0.1".into()],
         mcp_auth_token: Arc::from(TEST_MCP_TOKEN),
@@ -37,6 +51,29 @@ fn test_http_state(
         configured_namespaces: Vec::new(),
         build_version: "0.1.0-test".into(),
         git_sha: "deadbeef".into(),
+    }
+}
+
+fn test_config() -> clustersentinel::Config {
+    clustersentinel::Config {
+        bind_addr: "127.0.0.1:0".parse().expect("addr"),
+        events_mode: EventsMode::Demo,
+        list_limit: 500,
+        watch_timeout: Duration::from_secs(290),
+        watch_backoff: Duration::from_secs(5),
+        watch_backoff_max: Duration::from_secs(60),
+        registry_capacity: 100,
+        dedup_ttl: Duration::from_secs(3600),
+        metrics_event_limit: 500,
+        namespaces: Vec::new(),
+        mcp_allowed_hosts: vec!["localhost".into()],
+        mcp_auth_token: Some(TEST_MCP_TOKEN.to_owned()),
+        storage_path: None,
+        cluster_id: "default".into(),
+        storage_retention: Duration::from_secs(7 * 24 * 60 * 60),
+        storage_max_events: 250_000,
+        storage_prune_batch: 1_000,
+        writer_queue_capacity: 64,
     }
 }
 
@@ -119,31 +156,29 @@ async fn mcp_post(
 async fn demo_pipeline_seeds_registry_and_http_surfaces() {
     let metrics = Metrics::try_new().expect("metrics");
     let registry = EventRegistry::new(100, Duration::from_secs(3600));
+    let store = test_store();
     let watch_state = WatchStateHandle::new();
     let cancel = CancellationToken::new();
+    let storage_health = test_storage_health();
+    let (writer, writer_join) = spawn_durable_writer(
+        store.shared(),
+        64,
+        cancel.child_token(),
+        metrics.clone(),
+        storage_health,
+    );
 
     let pipeline_cancel = cancel.child_token();
     let pipeline_registry = registry.clone();
     let pipeline_metrics = metrics.clone();
     let pipeline_watch = watch_state.clone();
     let pipeline = tokio::spawn(async move {
-        let config = clustersentinel::Config {
-            bind_addr: "127.0.0.1:0".parse().expect("addr"),
-            events_mode: EventsMode::Demo,
-            list_limit: 500,
-            watch_timeout: Duration::from_secs(290),
-            watch_backoff: Duration::from_secs(5),
-            watch_backoff_max: Duration::from_secs(60),
-            registry_capacity: 100,
-            dedup_ttl: Duration::from_secs(3600),
-            metrics_event_limit: 500,
-            namespaces: Vec::new(),
-            mcp_allowed_hosts: vec!["localhost".into()],
-            mcp_auth_token: Some(TEST_MCP_TOKEN.to_owned()),
-        };
+        let mut config = test_config();
+        config.registry_capacity = 100;
         run_event_pipeline(
             config,
             pipeline_registry,
+            writer,
             pipeline_metrics,
             pipeline_watch,
             pipeline_cancel,
@@ -156,6 +191,7 @@ async fn demo_pipeline_seeds_registry_and_http_surfaces() {
 
     assert_eq!(registry.len().await, 3);
     assert!(registry.get("demo-uid-1").await.is_some());
+    assert!(store.get("demo-uid-1").await.expect("store get").is_some());
     let listed = registry
         .list(EventQuery {
             limit: 10,
@@ -167,7 +203,12 @@ async fn demo_pipeline_seeds_registry_and_http_surfaces() {
     assert_eq!(listed.len(), 2);
 
     let app = router(
-        test_http_state(registry.clone(), metrics.clone(), watch_state.clone()),
+        test_http_state(
+            registry.clone(),
+            store.clone(),
+            metrics.clone(),
+            watch_state.clone(),
+        ),
         cancel.child_token(),
     );
 
@@ -194,10 +235,54 @@ async fn demo_pipeline_seeds_registry_and_http_surfaces() {
     .expect("utf8");
     assert!(health_body.contains("\"events_mode\":\"demo\""));
     assert!(health_body.contains("\"registry_size\":3"));
+    assert!(health_body.contains("\"storage_status\":\"ready\""));
+    assert!(health_body.contains("\"storage_backend\":\"memory\""));
     assert!(
         health_body.contains("\"status\":\"healthy\"")
             || health_body.contains("\"status\":\"starting\"")
     );
+
+    let ready = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/ready")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("ready response");
+    assert_eq!(ready.status(), StatusCode::OK);
+
+    let not_ready_health = test_storage_health();
+    not_ready_health.note_error("simulated writer failure");
+    let not_ready_app = router(
+        HttpState {
+            registry: registry.clone(),
+            store: store.clone(),
+            metrics: metrics.clone(),
+            watch_state: watch_state.clone(),
+            storage_health: not_ready_health,
+            events_mode: EventsMode::Demo,
+            mcp_allowed_hosts: vec!["localhost".into(), "127.0.0.1".into()],
+            mcp_auth_token: Arc::from(TEST_MCP_TOKEN),
+            metrics_event_limit: 500,
+            configured_namespaces: Vec::new(),
+            build_version: "0.1.0-test".into(),
+            git_sha: "deadbeef".into(),
+        },
+        cancel.child_token(),
+    );
+    let ready_fail = not_ready_app
+        .oneshot(
+            Request::builder()
+                .uri("/ready")
+                .body(Body::empty())
+                .expect("request"),
+        )
+        .await
+        .expect("ready fail response");
+    assert_eq!(ready_fail.status(), StatusCode::SERVICE_UNAVAILABLE);
 
     let metrics_resp = app
         .clone()
@@ -221,6 +306,7 @@ async fn demo_pipeline_seeds_registry_and_http_surfaces() {
     )
     .expect("utf8");
     assert!(metrics_body.contains("clustersentinel_events_registered_total"));
+    assert!(metrics_body.contains("clustersentinel_storage_writes_total"));
     assert!(metrics_body.contains("event_namespace=\"demo\""));
     assert!(metrics_body.contains("involved_kind=\"Pod\""));
     assert!(metrics_body.contains("reason=\"BackOff\""));
@@ -289,6 +375,7 @@ async fn demo_pipeline_seeds_registry_and_http_surfaces() {
 
     cancel.cancel();
     pipeline.await.expect("pipeline join");
+    writer_join.await.expect("writer join");
 }
 
 #[tokio::test]
@@ -298,7 +385,7 @@ async fn mcp_requires_valid_bearer_token() {
     let watch_state = WatchStateHandle::new();
     let cancel = CancellationToken::new();
     let app = router(
-        test_http_state(registry, metrics, watch_state),
+        test_http_state(registry, test_store(), metrics, watch_state),
         cancel.child_token(),
     );
 
@@ -396,7 +483,7 @@ async fn mcp_requires_valid_bearer_token() {
             Request::builder()
                 .method("POST")
                 .uri("/mcp")
-                .header("host", "clustersentinel.example.com")
+                .header("host", "clustersentinel.svc.cluster.local")
                 .header("authorization", format!("Bearer {TEST_MCP_TOKEN}"))
                 .header("content-type", "application/json")
                 .header("accept", "application/json, text/event-stream")
@@ -410,13 +497,14 @@ async fn mcp_requires_valid_bearer_token() {
     assert_eq!(
         disallowed_host.status(),
         StatusCode::FORBIDDEN,
-        "external Host must be 403 when the test allow-list is localhost-only"
+        "prod Host must be 403 when test allow-list is localhost-only"
     );
 
     // /health stays open for probes.
     let health = router(
         test_http_state(
             EventRegistry::new(1, Duration::from_secs(60)),
+            test_store(),
             Metrics::try_new().expect("metrics"),
             WatchStateHandle::new(),
         ),
@@ -437,39 +525,40 @@ async fn mcp_requires_valid_bearer_token() {
 async fn mcp_streamable_handshake_tools_and_resources() {
     let metrics = Metrics::try_new().expect("metrics");
     let registry = EventRegistry::new(100, Duration::from_secs(3600));
+    let store = test_store();
     let watch_state = WatchStateHandle::new();
     watch_state.set(clustersentinel::events::WatchState::Watching);
     let cancel = CancellationToken::new();
 
-    // Seed one event for tools/call.
+    // Seed one event for tools/call (durable store is the query source).
     let now = chrono::Utc::now();
-    registry
-        .upsert(clustersentinel::events::ClusterEvent {
-            uid: "mcp-test-uid".into(),
+    let event = clustersentinel::events::ClusterEvent {
+        uid: "mcp-test-uid".into(),
+        namespace: "demo".into(),
+        name: "evt.mcp".into(),
+        resource_version: "1".into(),
+        event_type: "Warning".into(),
+        reason: "BackOff".into(),
+        message: "handshake probe".into(),
+        count: 2,
+        involved_object: clustersentinel::events::InvolvedObject {
+            kind: "Pod".into(),
             namespace: "demo".into(),
-            name: "evt.mcp".into(),
-            resource_version: "1".into(),
-            event_type: "Warning".into(),
-            reason: "BackOff".into(),
-            message: "handshake probe".into(),
-            count: 2,
-            involved_object: clustersentinel::events::InvolvedObject {
-                kind: "Pod".into(),
-                namespace: "demo".into(),
-                name: "web".into(),
-                uid: Some("pod-1".into()),
-                api_version: Some("v1".into()),
-            },
-            source_component: Some("kubelet".into()),
-            first_timestamp: Some(now),
-            last_timestamp: Some(now),
-            event_time: Some(now),
-            registered_at: now,
-        })
-        .await;
+            name: "web".into(),
+            uid: Some("pod-1".into()),
+            api_version: Some("v1".into()),
+        },
+        source_component: Some("kubelet".into()),
+        first_timestamp: Some(now),
+        last_timestamp: Some(now),
+        event_time: Some(now),
+        registered_at: now,
+    };
+    registry.upsert(event.clone()).await;
+    store.upsert(&event).await.expect("store upsert");
 
     let app = router(
-        test_http_state(registry, metrics, watch_state),
+        test_http_state(registry, store, metrics, watch_state),
         cancel.child_token(),
     );
 
@@ -647,7 +736,11 @@ async fn mcp_streamable_handshake_tools_and_resources() {
             "summarize_events",
             serde_json::json!({"type": "Critical"}),
         ),
-        (22, "search_events", serde_json::json!({"cursor": "1"})),
+        (
+            22,
+            "search_events",
+            serde_json::json!({"cursor": "not-a-cursor"}),
+        ),
         (
             23,
             "summarize_events",
@@ -738,20 +831,8 @@ async fn mcp_streamable_handshake_tools_and_resources() {
 
 #[test]
 fn http_mode_config_requires_mcp_token() {
-    let mut config = clustersentinel::Config {
-        bind_addr: "127.0.0.1:0".parse().expect("addr"),
-        events_mode: EventsMode::Demo,
-        list_limit: 500,
-        watch_timeout: Duration::from_secs(290),
-        watch_backoff: Duration::from_secs(5),
-        watch_backoff_max: Duration::from_secs(60),
-        registry_capacity: 100,
-        dedup_ttl: Duration::from_secs(3600),
-        metrics_event_limit: 500,
-        namespaces: Vec::new(),
-        mcp_allowed_hosts: vec!["localhost".into()],
-        mcp_auth_token: None,
-    };
+    let mut config = test_config();
+    config.mcp_auth_token = None;
     assert!(config.require_mcp_auth_token().is_err());
     config.mcp_auth_token = Some(String::new());
     assert!(config.require_mcp_auth_token().is_err());

@@ -7,6 +7,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 
+use super::cursor::paginate_events;
 use super::model::ClusterEvent;
 
 /// Filter for listing registered events.
@@ -22,7 +23,10 @@ pub struct EventQuery {
 #[derive(Debug, Clone, Default)]
 pub struct EventSearchQuery {
     pub limit: usize,
+    /// Deprecated offset into the filtered set. Ignored when [`Self::after`] is set.
     pub offset: usize,
+    /// Keyset resume point `(observed_at, event_uid)` exclusive in DESC order.
+    pub after: Option<(DateTime<Utc>, String)>,
     pub since: Option<DateTime<Utc>>,
     pub until: Option<DateTime<Utc>>,
     pub namespaces: Vec<String>,
@@ -42,7 +46,10 @@ pub struct EventSearchResult {
     pub matched: usize,
     pub returned: usize,
     pub truncated: bool,
+    /// Deprecated absolute offset for clients still using decimal cursors.
     pub next_offset: Option<usize>,
+    /// Next keyset resume point when more rows remain.
+    pub next_after: Option<(DateTime<Utc>, String)>,
 }
 
 /// Aggregation key for `summarize_events`.
@@ -190,23 +197,14 @@ impl RegistryInner {
             .filter(|event| self.matches_search(event, query, message_needle.as_deref()))
             .cloned()
             .collect();
-        matched.sort_by_key(|event| std::cmp::Reverse(event.observed_at()));
+        matched.sort_by(|left, right| {
+            right
+                .observed_at()
+                .cmp(&left.observed_at())
+                .then_with(|| right.uid.cmp(&left.uid))
+        });
 
-        let matched_count = matched.len();
-        let offset = query.offset.min(matched_count);
-        let end = offset.saturating_add(limit).min(matched_count);
-        let page = matched[offset..end].to_vec();
-        let returned = page.len();
-        let truncated = end < matched_count;
-        let next_offset = truncated.then_some(end);
-
-        EventSearchResult {
-            events: page,
-            matched: matched_count,
-            returned,
-            truncated,
-            next_offset,
-        }
+        paginate_events(matched, query.offset, query.after.as_ref(), limit)
     }
 
     fn matches_search(

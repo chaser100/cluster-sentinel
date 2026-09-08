@@ -2,6 +2,7 @@
 
 use std::env;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::error::{AppError, AppResult};
@@ -22,9 +23,27 @@ pub const DEFAULT_REGISTRY_CAPACITY: usize = 10_000;
 pub const DEFAULT_DEDUP_TTL_SECS: u64 = 3600;
 /// Default max events exported on `/metrics` inventory gauges.
 pub const DEFAULT_METRICS_EVENT_LIMIT: usize = 500;
+/// Default durable SQLite path (PVC mount in cluster).
+pub const DEFAULT_STORAGE_PATH: &str = "/var/lib/clustersentinel/events.db";
+/// Default durable retention (7 days).
+pub const DEFAULT_STORAGE_RETENTION_SECS: u64 = 7 * 24 * 60 * 60;
+/// Default durable max events cap.
+pub const DEFAULT_STORAGE_MAX_EVENTS: usize = 250_000;
+/// Default bounded writer queue depth (backpressure).
+pub const DEFAULT_WRITER_QUEUE_CAPACITY: usize = 64;
+/// Default logical cluster id for durable rows / checkpoints.
+pub const DEFAULT_CLUSTER_ID: &str = "default";
+/// Default prune batch size.
+pub const DEFAULT_STORAGE_PRUNE_BATCH: usize = 1_000;
 /// Default MCP Host allow-list (DNS-rebinding protection).
-pub const DEFAULT_MCP_ALLOWED_HOSTS: &[&str] =
-    &["localhost", "127.0.0.1", "::1", "clustersentinel"];
+pub const DEFAULT_MCP_ALLOWED_HOSTS: &[&str] = &[
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "clustersentinel",
+    "clustersentinel.clustersentinel.svc",
+    "clustersentinel.clustersentinel.svc.cluster.local",
+];
 
 /// Event ingestion backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +92,14 @@ pub struct Config {
     pub mcp_allowed_hosts: Vec<String>,
     /// Bearer token for streamable HTTP `/mcp`. Required in HTTP mode; unused for `--mcp-stdio`.
     pub mcp_auth_token: Option<String>,
+    /// SQLite path. `None` → in-memory (demo/tests without PVC).
+    pub storage_path: Option<PathBuf>,
+    /// Logical cluster id stored with durable rows.
+    pub cluster_id: String,
+    pub storage_retention: Duration,
+    pub storage_max_events: usize,
+    pub storage_prune_batch: usize,
+    pub writer_queue_capacity: usize,
 }
 
 impl Config {
@@ -154,6 +181,29 @@ impl Config {
             .map(|raw| raw.trim().to_owned())
             .filter(|token| !token.is_empty());
 
+        let storage_path = parse_storage_path(events_mode)?;
+        let cluster_id = env::var("CLUSTERSENTINEL_CLUSTER_ID")
+            .ok()
+            .map(|raw| raw.trim().to_owned())
+            .filter(|id| !id.is_empty())
+            .unwrap_or_else(|| DEFAULT_CLUSTER_ID.to_owned());
+        let storage_retention_secs = parse_u64(
+            "CLUSTERSENTINEL_STORAGE_RETENTION_SECS",
+            DEFAULT_STORAGE_RETENTION_SECS,
+        )?;
+        let storage_max_events = parse_usize(
+            "CLUSTERSENTINEL_STORAGE_MAX_EVENTS",
+            DEFAULT_STORAGE_MAX_EVENTS,
+        )?;
+        let storage_prune_batch = parse_usize(
+            "CLUSTERSENTINEL_STORAGE_PRUNE_BATCH",
+            DEFAULT_STORAGE_PRUNE_BATCH,
+        )?;
+        let writer_queue_capacity = parse_usize(
+            "CLUSTERSENTINEL_WRITER_QUEUE_CAPACITY",
+            DEFAULT_WRITER_QUEUE_CAPACITY,
+        )?;
+
         Ok(Self {
             bind_addr,
             events_mode,
@@ -167,6 +217,12 @@ impl Config {
             namespaces,
             mcp_allowed_hosts,
             mcp_auth_token,
+            storage_path,
+            cluster_id,
+            storage_retention: Duration::from_secs(storage_retention_secs),
+            storage_max_events,
+            storage_prune_batch,
+            writer_queue_capacity,
         })
     }
 
@@ -185,6 +241,26 @@ impl Config {
                         .to_owned(),
                 )
             })
+    }
+}
+
+fn parse_storage_path(events_mode: EventsMode) -> AppResult<Option<PathBuf>> {
+    match env::var("CLUSTERSENTINEL_STORAGE_PATH") {
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty()
+                || trimmed.eq_ignore_ascii_case("memory")
+                || trimmed.eq_ignore_ascii_case(":memory:")
+            {
+                Ok(None)
+            } else {
+                Ok(Some(PathBuf::from(trimmed)))
+            }
+        }
+        Err(_) => match events_mode {
+            EventsMode::Demo => Ok(None),
+            EventsMode::Kubernetes => Ok(Some(PathBuf::from(DEFAULT_STORAGE_PATH))),
+        },
     }
 }
 
@@ -227,8 +303,15 @@ mod tests {
     }
 
     #[test]
-    fn default_mcp_allowed_hosts_include_local_and_service_names() {
-        assert!(DEFAULT_MCP_ALLOWED_HOSTS.contains(&"localhost"));
-        assert!(DEFAULT_MCP_ALLOWED_HOSTS.contains(&"clustersentinel"));
+    fn default_mcp_allowed_hosts_include_service_dns_names() {
+        assert!(
+            DEFAULT_MCP_ALLOWED_HOSTS.contains(&"clustersentinel.clustersentinel.svc"),
+            "namespace-qualified in-cluster Service DNS must be allowed"
+        );
+        assert!(
+            DEFAULT_MCP_ALLOWED_HOSTS
+                .contains(&"clustersentinel.clustersentinel.svc.cluster.local"),
+            "fully qualified in-cluster Service DNS must be allowed"
+        );
     }
 }

@@ -134,6 +134,41 @@ route:
 
 When `route.spec` is non-empty, it replaces the spec generated from `route.gateway`, `route.hostname`, `route.path`, and the other simple route fields. HTTPRoute metadata still comes from `route.name`, `route.labels`, and `route.annotations`.
 
+### Service Application Protocol
+
+The chart-managed Service accepts an optional application protocol hint:
+
+```yaml
+service:
+  name: http
+  port: 9005
+  targetPort: http
+  appProtocol: grpc
+```
+
+Services created for `ingressPlain` paths support the same field:
+
+```yaml
+ingressPlain:
+  enabled: true
+  items:
+    - rules:
+        - host: grpc.example.com
+          paths:
+            - path: /
+              backend:
+                service:
+                  name: grpc-api
+                  port: 9005
+              createService: true
+              service:
+                port: 9005
+                targetPort: http
+                appProtocol: grpc
+```
+
+The chart omits `appProtocol` when it is not configured for either Service type.
+
 ### Horizontal Autoscaling
 
 ```yaml
