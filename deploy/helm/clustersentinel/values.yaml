@@ -37,7 +37,7 @@ clustersentinel:
   replicaCount: 1
 
   image: chaser420/cluster-sentinel
-  imageTag: "0.9.2"
+  imageTag: "0.9.3"
   imagePullPolicy: IfNotPresent
   imagePullSecrets: []
 

@@ -154,6 +154,17 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Scan published image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ needs.validate.outputs.version }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: false
+          vuln-type: os,library
+          severity: LOW,MEDIUM,HIGH,CRITICAL
+          version: v0.74.0
+
       - name: Verify published image platforms
         env:
           VERSION: ${{ needs.validate.outputs.version }}
