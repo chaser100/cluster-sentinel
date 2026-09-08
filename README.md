@@ -1,13 +1,12 @@
 # Cluster Sentinel
 
-[![CI](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml)
 [![Docker image](https://img.shields.io/docker/v/chaser420/cluster-sentinel?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/chaser420/cluster-sentinel)
 [![Helm chart](https://img.shields.io/badge/Helm-0.9.3-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Cluster Sentinel watches Kubernetes Events, persists event history and watch checkpoints in SQLite, and keeps a bounded in-memory read cache. It exposes Prometheus metrics, a read-only HTTP API, and an embedded MCP server for operators and agents.
 
-The repository also ships alert rules, a Grafana dashboard, a Docker image, and a Helm chart built on [Universal Helm Chart](https://github.com/chaser100/u-helm-chart).
+The project includes a Docker image, a Helm chart, Prometheus alert rules, and a Grafana dashboard.
 
 ## Endpoints
 
@@ -69,7 +68,7 @@ docker run --rm \
 
 ## Helm installation
 
-The chart repository is served by GitHub Pages. The release archive includes the `application` dependency; installation does not require adding the Universal Helm Chart repository or running `helm dependency update`.
+Install Cluster Sentinel from the official Helm repository:
 
 ```bash
 helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
@@ -101,7 +100,7 @@ For an externally reachable MCP endpoint, add the public hostname to `CLUSTERSEN
 The chart has three configuration levels:
 
 1. Top-level values configure resources owned by the Cluster Sentinel chart: MCP authentication, RBAC, Prometheus rules, and the Grafana dashboard.
-2. Values under `clustersentinel` are passed to the aliased Universal Helm Chart dependency. They configure the Deployment, Service, ServiceAccount, probes, resources, routing, and ServiceMonitor.
+2. Values under `clustersentinel` configure the Deployment, Service, ServiceAccount, probes, resources, routing, and ServiceMonitor.
 3. Entries in `clustersentinel.env` become environment variables in the application container.
 
 The chart includes [`values.schema.json`](deploy/helm/clustersentinel/values.schema.json). Commands such as `helm lint`, `helm install`, and `helm upgrade` reject invalid types and values before rendering Kubernetes resources.
@@ -162,7 +161,7 @@ echo
 | `clustersentinel.envSecrets` | MCP token reference | Maps Secret keys to container environment variables. |
 | `clustersentinel.env` | runtime defaults | Supplies non-secret application environment variables. |
 
-Other values supported by the dependency can also be placed under `clustersentinel`. See the [Universal Helm Chart values](https://github.com/chaser100/u-helm-chart/tree/main/helm-charts/application) for Ingress, autoscaling, volumes, extra containers, annotations, and scheduling options.
+Run `helm show values cluster-sentinel/clustersentinel --version 0.9.3` to view the complete configuration.
 
 ### Persistent event storage
 
@@ -248,9 +247,9 @@ clustersentinel:
       value: info
 ```
 
-### Existing MCP Secret
+### Existing MCP secret
 
-When another controller or an operator manages the token, set both the chart-level Secret reference and the environment mapping. The two values are separate because the Deployment is rendered by the Universal Helm Chart dependency.
+When another controller or an operator manages the token, set the Secret reference and map its key to the application environment variable.
 
 ```yaml
 mcpAuth:
@@ -270,106 +269,18 @@ The Secret key must contain a non-empty token. Do not place the token directly i
 
 The complete chart configuration and Gateway API example are available in [the chart README](deploy/helm/clustersentinel/README.md).
 
-## Observability files
+## Observability
 
-- `observability/alerts/clustersentinel.yaml` contains the Prometheus alert rules.
-- `observability/dashboards/clustersentinel.json` is the Grafana dashboard bundled with the chart.
+Cluster Sentinel exposes Prometheus metrics at `/metrics`. The Helm chart can create a `ServiceMonitor` and installs alert rules for watcher failures, storage errors, registry pressure, and PVC capacity when `prometheusRule.enabled` is enabled.
 
-CI checks that the alert and dashboard files bundled in the chart match these source files.
+The bundled Grafana dashboard shows event rates, warning reasons, watcher state, storage health, retention activity, and PVC usage. It is published as a labeled `ConfigMap` for discovery by the Grafana sidecar.
 
-## Development
+## Documentation
 
-```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test --locked
-
-helm lint deploy/helm/clustersentinel --strict
-helm template clustersentinel deploy/helm/clustersentinel \
-  --namespace clustersentinel \
-  --values deploy/helm/clustersentinel/tests/values-observability.yaml
-
-helm package deploy/helm/clustersentinel --destination /tmp
-helm template clustersentinel /tmp/clustersentinel-0.9.3.tgz \
-  --namespace clustersentinel
-```
-
-### Bundled dependency
-
-The upstream `application:0.4.1` chart is committed under `deploy/helm/clustersentinel/charts/application/`. Both a fresh checkout and the published archive can be rendered without downloading that dependency. `Chart.yaml` retains the upstream URL and alias `clustersentinel`; `Chart.lock` records the dependency version.
-
-Dependency updates are deliberate release changes. Download the chosen upstream release into a temporary directory, verify its archive digest against the upstream repository index, and replace the complete `charts/application/` directory with its extracted contents. Update the dependency declaration and regenerate `Chart.lock` in a temporary working copy. Commit the directory and lock file together, review the upstream changes, and bump the Cluster Sentinel release version. Do not leave an additional `application-*.tgz` in `charts/` alongside the extracted chart.
-
-The local action `.github/actions/validate-chart` runs in CI, release validation, and chart publication after Helm setup. It checks dependency metadata, bundled observability files, schema validation, and rendering from the packaged chart with an empty Helm configuration. Test values cover Prometheus Operator resources and an externally managed MCP Secret.
-
-## Release process
-
-Application and chart versions move together. Before creating a release, update all of these values to the same semantic version:
-
-- `Cargo.toml`: `package.version`
-- `Cargo.lock`: the `clustersentinel` package version; keep other dependency versions unchanged
-- `deploy/helm/clustersentinel/Chart.yaml`: `version` and `appVersion`
-- `deploy/helm/clustersentinel/Chart.yaml`: image tag in `artifacthub.io/images`
-- `deploy/helm/clustersentinel/values.yaml`: `clustersentinel.imageTag`
-- `deploy/helm/clustersentinel/values.schema.json`: default `clustersentinel.imageTag`
-- Root and chart `README.md`: installation examples and displayed version
-- `CHANGELOG.md`: release notes
-
-Use this order: **feature branch → pull request → main → successful main CI → tag**. For the uncommitted `0.9.3` changes, create the feature branch before committing:
-
-```bash
-git switch -c feature/release-0.9.3
-git add -A
-git diff --cached --stat
-git diff --cached
-git commit -m "Prepare Cluster Sentinel 0.9.3"
-git push -u origin feature/release-0.9.3
-gh pr create --base main --head feature/release-0.9.3 \
-  --title "Release 0.9.3" --body "Harden the runtime image and add vulnerability gates to CI and release publication."
-gh pr checks --watch
-```
-
-Review the staged diff before committing. Merge the PR only after its CI passes. Then update local `main` and find the push CI run for the exact merged commit:
-
-```bash
-git switch main
-git pull --ff-only
-gh run list --workflow ci.yml --branch main --event push \
-  --commit "$(git rev-parse HEAD)" --limit 5
-```
-
-Wait for that run with `gh run watch <run-id> --exit-status`. Only after it succeeds, create and push the tag from clean, up-to-date `main`:
-
-```bash
-test "$(git branch --show-current)" = main
-test -z "$(git status --porcelain)"
-git fetch origin main
-test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-git tag -a v0.9.3 -m "Cluster Sentinel 0.9.3"
-git push origin v0.9.3
-```
-
-Stop if any command fails. Do not tag the feature branch. Release validation rejects a commit outside `main` or without a successful push CI run for that exact commit on `main`.
-
-All CI and release jobs use the ephemeral ARC scale set `cluster-sentinel-k8s`, with one job at a time and no fallback to GitHub-hosted runners. The runner must provide Rust `1.89.0` with Clippy/rustfmt, Git, curl, jq, GitHub CLI, Docker and Buildx. Each job gets a new pod; Helm is installed by the workflow. If the cluster is unavailable, jobs wait in the queue.
-
-The release workflow builds statically linked MUSL binaries for `linux/amd64` and `linux/arm64`, runs them on digest-pinned `distroless/static-debian13:nonroot`, and pushes `0.9.3` and `latest` to Docker Hub. Trivy scans the CI image and the published release image for OS and library vulnerabilities at every severity; any finding stops the workflow before chart publication. The release then checks that both image platforms are present. Cargo uses one build job, including inside the Dockerfile. Container builds default to `CARGO_PROFILE_RELEASE_LTO=thin`: full LTO exceeded the builder memory limit during local validation. Both CI and release use `.github/buildkitd.toml` to limit BuildKit parallelism to one; the builder container is capped at 1536 MiB memory, without extra swap, and two CPUs. These limits leave space within the 2 GiB DinD sidecar, but a full multiarch build still needs verification on the runner. Image publication has a 180-minute timeout. Only after it succeeds does the workflow validate and package the chart, create a GitHub Release, and attach the chart and SHA-256 checksum. Do not create a second release manually with `gh release create`.
-
-The local amd64 build with ThinLTO passed under these resource limits. Builder settings use the existing SHA-pinned [docker/setup-buildx-action v4.3.0](https://github.com/docker/setup-buildx-action/tree/37fe631027851001ddb9b187196cc803df7f5f0e) and its documented [resource limits](https://docs.docker.com/build/builders/drivers/docker-container/). The existing [docker/setup-qemu-action v4.3.0](https://github.com/docker/setup-qemu-action/tree/1f40c72289eff860ee54a304f1438e3cff362e0a) installs only the arm64 emulator (sources verified 2026-09-07).
-
-Pages is rebuilt from the published release archives. A failed download stops publication so an incomplete index cannot silently remove an earlier chart version. Release runs share a concurrency group to prevent simultaneous Pages deployments. The Pages artifact is retained for seven days. After deployment, the workflow checks the public index, downloads the new chart, and renders it with an empty Helm configuration.
-
-Configure the repository before the first tag:
-
-1. Add Actions secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
-2. In **Settings > Pages**, select **GitHub Actions** as the source.
-3. In **Settings > Environments > github-pages > Deployment branches and tags**, use **Selected branches and tags** and add a **Tag** rule with the pattern `v*.*.*`. A rule for the `main` branch alone does not permit tag-triggered releases to deploy.
-4. Keep workflow permissions enabled for the repository. The release job requests only the scopes it needs.
-5. Register the `cluster-sentinel-k8s` runner and set **Settings > Actions > General > Fork pull request workflows > Require approval for all outside collaborators**. CI skips fork PRs, but a PR can change the workflow itself: this condition does not replace repository-level approval. Do not approve external code on the shared cluster runner; use an isolated environment for those contributions.
-
-If Pages rejects a release because of environment protection rules, add the tag rule and rerun the failed deployment job. If the `github-pages` artifact has expired, rerun `Build Helm repository` and its dependent deployment job to generate a fresh artifact.
-
-The chart is registered in Artifact Hub from `https://chaser100.github.io/cluster-sentinel`. The repository ID `fd95efee-b435-4990-9f37-529a4ff5dba1` is stored in `docs/artifacthub-repo.yml` for the Verified publisher check. Artifact Hub renders the package description from `deploy/helm/clustersentinel/README.md`; the chart `icon` points to `docs/logo.svg`, published as `/logo.svg` on Pages. The `Helm Repository` workflow publishes Pages metadata and visual assets from `main` without rebuilding the application image or creating another release. Artifact Hub applies updates after it processes a changed repository index.
+- [MCP client configuration](docs/mcp.md)
+- [Architecture and event flow](docs/architecture.md)
+- [Helm chart configuration](deploy/helm/clustersentinel/README.md)
+- [Release history](CHANGELOG.md)
 
 ## License
 
