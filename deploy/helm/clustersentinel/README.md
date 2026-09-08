@@ -20,7 +20,7 @@ Use it when an event may disappear from the Kubernetes API before an engineer or
 | ServiceMonitor | disabled | Configures Prometheus Operator scraping for `/metrics` |
 | PrometheusRule | disabled | Installs seven watch, storage, registry, and PVC alerts |
 
-The container runs as UID `65532`, drops all Linux capabilities, uses a read-only root filesystem, and writes only to the mounted data volume. The default `Recreate` deployment strategy and single replica prevent two processes from opening the same SQLite database.
+The application is a statically linked MUSL binary running on `distroless/static-debian13:nonroot`. The runtime image does not contain OpenSSL, glibc, GCC runtime libraries, a package manager, or a shell. The container runs as UID `65532`, drops all Linux capabilities, uses a read-only root filesystem, and writes only to the mounted data volume. The default `Recreate` deployment strategy and single replica prevent two processes from opening the same SQLite database.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -269,7 +269,7 @@ Gateway API and Prometheus Operator CRDs are not installed by this chart.
 | `prometheusRule.enabled` | `false` | Create the bundled PrometheusRule |
 | `prometheusRule.labels` | `release: kube-prometheus-stack` | Labels used by the Prometheus rule selector |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository |
-| `clustersentinel.imageTag` | `0.9.2` | Container image tag; release tags match the chart version |
+| `clustersentinel.imageTag` | `0.9.3` | Container image tag; release tags match the chart version |
 | `clustersentinel.replicaCount` | `1` | Replica count; keep one replica with the default SQLite database |
 | `clustersentinel.deploymentStrategy.type` | `Recreate` | Prevent concurrent access to the RWO SQLite volume during upgrades |
 | `clustersentinel.persistentVolumeClaims` | `clustersentinel-data`, `5Gi`, `ReadWriteOnce` | Create and mount durable SQLite storage |
@@ -315,9 +315,9 @@ Review values and rendered manifests before an upgrade:
 
 ```bash
 helm repo update
-helm show values cluster-sentinel/clustersentinel --version 0.9.2 > values-0.9.2.yaml
+helm show values cluster-sentinel/clustersentinel --version 0.9.3 > values-0.9.3.yaml
 helm template clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace clustersentinel \
   --values my-values.yaml > rendered.yaml
 ```
@@ -326,7 +326,7 @@ The `0.9.2` upgrade creates the first persistent store for installations coming 
 
 ```bash
 helm upgrade clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace clustersentinel \
   --values my-values.yaml
 ```

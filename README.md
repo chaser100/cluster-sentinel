@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml/badge.svg)](https://github.com/chaser100/cluster-sentinel/actions/workflows/ci.yml)
 [![Docker image](https://img.shields.io/docker/v/chaser420/cluster-sentinel?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/chaser420/cluster-sentinel)
-[![Helm chart](https://img.shields.io/badge/Helm-0.9.2-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
+[![Helm chart](https://img.shields.io/badge/Helm-0.9.3-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Cluster Sentinel watches Kubernetes Events, persists event history and watch checkpoints in SQLite, and keeps a bounded in-memory read cache. It exposes Prometheus metrics, a read-only HTTP API, and an embedded MCP server for operators and agents.
@@ -54,7 +54,7 @@ See [MCP configuration](docs/mcp.md) for client examples and [architecture](docs
 Release images are published to Docker Hub with the same version as the Helm chart:
 
 ```bash
-docker pull chaser420/cluster-sentinel:0.9.2
+docker pull chaser420/cluster-sentinel:0.9.3
 ```
 
 Run the demo image locally:
@@ -64,7 +64,7 @@ docker run --rm \
   --publish 8080:8080 \
   --env CLUSTERSENTINEL_EVENTS_MODE=demo \
   --env CLUSTERSENTINEL_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
-  chaser420/cluster-sentinel:0.9.2
+  chaser420/cluster-sentinel:0.9.3
 ```
 
 ## Helm installation
@@ -76,7 +76,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -87,7 +87,7 @@ Prometheus Operator resources are opt-in because their CRDs are not present in e
 
 ```bash
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.2 \
+  --version 0.9.3 \
   --namespace clustersentinel \
   --create-namespace \
   --set clustersentinel.serviceMonitor.enabled=true \
@@ -137,7 +137,7 @@ echo
 | `clustersentinel.fullnameOverride` | `clustersentinel` | Keeps Deployment, Service, and ServiceAccount names stable. |
 | `clustersentinel.replicaCount` | `1` | Number of application pods. Keep one replica while MCP sessions are stored in memory. |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository. |
-| `clustersentinel.imageTag` | `0.9.2` | Container image version. Release tags, chart versions, and this value must match. |
+| `clustersentinel.imageTag` | `0.9.3` | Container image version. Release tags, chart versions, and this value must match. |
 | `clustersentinel.imagePullPolicy` | `IfNotPresent` | Kubernetes image pull policy. |
 | `clustersentinel.imagePullSecrets` | `[]` | Secret references required by a private container registry. Each item uses the form `name: secret-name`. |
 | `clustersentinel.service.name` | `http` | Service port name used by probes and ServiceMonitor. |
@@ -290,7 +290,7 @@ helm template clustersentinel deploy/helm/clustersentinel \
   --values deploy/helm/clustersentinel/tests/values-observability.yaml
 
 helm package deploy/helm/clustersentinel --destination /tmp
-helm template clustersentinel /tmp/clustersentinel-0.9.2.tgz \
+helm template clustersentinel /tmp/clustersentinel-0.9.3.tgz \
   --namespace clustersentinel
 ```
 
@@ -315,17 +315,17 @@ Application and chart versions move together. Before creating a release, update 
 - Root and chart `README.md`: installation examples and displayed version
 - `CHANGELOG.md`: release notes
 
-Use this order: **feature branch → pull request → main → successful main CI → tag**. For the uncommitted `0.9.2` changes, create the feature branch before committing:
+Use this order: **feature branch → pull request → main → successful main CI → tag**. For the uncommitted `0.9.3` changes, create the feature branch before committing:
 
 ```bash
-git switch -c feature/release-0.9.2
+git switch -c feature/release-0.9.3
 git add -A
 git diff --cached --stat
 git diff --cached
-git commit -m "Prepare Cluster Sentinel 0.9.2"
-git push -u origin feature/release-0.9.2
-gh pr create --base main --head feature/release-0.9.2 \
-  --title "Release 0.9.2" --body "Add durable event storage and update the bundled Universal Helm Chart dependency."
+git commit -m "Prepare Cluster Sentinel 0.9.3"
+git push -u origin feature/release-0.9.3
+gh pr create --base main --head feature/release-0.9.3 \
+  --title "Release 0.9.3" --body "Harden the runtime image and add vulnerability gates to CI and release publication."
 gh pr checks --watch
 ```
 
@@ -345,15 +345,15 @@ test "$(git branch --show-current)" = main
 test -z "$(git status --porcelain)"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-git tag -a v0.9.2 -m "Cluster Sentinel 0.9.2"
-git push origin v0.9.2
+git tag -a v0.9.3 -m "Cluster Sentinel 0.9.3"
+git push origin v0.9.3
 ```
 
 Stop if any command fails. Do not tag the feature branch. Release validation rejects a commit outside `main` or without a successful push CI run for that exact commit on `main`.
 
 All CI and release jobs use the ephemeral ARC scale set `cluster-sentinel-k8s`, with one job at a time and no fallback to GitHub-hosted runners. The runner must provide Rust `1.89.0` with Clippy/rustfmt, Git, curl, jq, GitHub CLI, Docker and Buildx. Each job gets a new pod; Helm is installed by the workflow. If the cluster is unavailable, jobs wait in the queue.
 
-The release workflow builds `linux/amd64` and `linux/arm64` images, pushes `0.9.2` and `latest` to Docker Hub, and checks that both platforms are present. Cargo uses one build job, including inside the Dockerfile. Container builds default to `CARGO_PROFILE_RELEASE_LTO=thin`: full LTO exceeded the builder memory limit during local validation. Both CI and release use `.github/buildkitd.toml` to limit BuildKit parallelism to one; the builder container is capped at 1536 MiB memory, without extra swap, and two CPUs. These limits leave space within the 2 GiB DinD sidecar, but a full multiarch build still needs verification on the runner. Image publication has a 180-minute timeout. Only after it succeeds does the workflow validate and package the chart, create a GitHub Release, and attach the chart and SHA-256 checksum. Do not create a second release manually with `gh release create`.
+The release workflow builds statically linked MUSL binaries for `linux/amd64` and `linux/arm64`, runs them on digest-pinned `distroless/static-debian13:nonroot`, and pushes `0.9.3` and `latest` to Docker Hub. Trivy scans the CI image and the published release image for OS and library vulnerabilities at every severity; any finding stops the workflow before chart publication. The release then checks that both image platforms are present. Cargo uses one build job, including inside the Dockerfile. Container builds default to `CARGO_PROFILE_RELEASE_LTO=thin`: full LTO exceeded the builder memory limit during local validation. Both CI and release use `.github/buildkitd.toml` to limit BuildKit parallelism to one; the builder container is capped at 1536 MiB memory, without extra swap, and two CPUs. These limits leave space within the 2 GiB DinD sidecar, but a full multiarch build still needs verification on the runner. Image publication has a 180-minute timeout. Only after it succeeds does the workflow validate and package the chart, create a GitHub Release, and attach the chart and SHA-256 checksum. Do not create a second release manually with `gh release create`.
 
 The local amd64 build with ThinLTO passed under these resource limits. Builder settings use the existing SHA-pinned [docker/setup-buildx-action v4.3.0](https://github.com/docker/setup-buildx-action/tree/37fe631027851001ddb9b187196cc803df7f5f0e) and its documented [resource limits](https://docs.docker.com/build/builders/drivers/docker-container/). The existing [docker/setup-qemu-action v4.3.0](https://github.com/docker/setup-qemu-action/tree/1f40c72289eff860ee54a304f1438e3cff362e0a) installs only the arm64 emulator (sources verified 2026-09-07).
 

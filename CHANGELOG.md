@@ -2,6 +2,13 @@
 
 All notable changes are documented in this file. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-09-08
+
+### Security
+
+- Build a statically linked MUSL binary and run it on digest-pinned `distroless/static-debian13:nonroot`, removing OpenSSL, glibc, and GCC runtime packages from the application image.
+- Scan CI and published images with Trivy and reject any detected OS or library vulnerability at every severity.
+
 ## [0.9.2] - 2026-09-08
 
 ### Added
@@ -55,6 +62,7 @@ All notable changes are documented in this file. The project follows [Semantic V
 - JSON Schema for Helm values validation and Artifact Hub configuration display.
 - Kubernetes event RBAC, Prometheus alert rules, Grafana dashboard, and MCP authentication templates.
 
+[0.9.3]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.3
 [0.9.2]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.2
 [0.9.1]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.1
 [0.9.0]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.0
