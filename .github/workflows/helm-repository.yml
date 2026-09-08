@@ -105,6 +105,17 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
 
+  verify-pages:
+    name: Verify published repository
+    needs:
+      - build-pages
+      - deploy-pages
+    permissions:
+      contents: read
+    runs-on: cluster-sentinel-k8s
+    timeout-minutes: 20
+
+    steps:
       - name: Verify published repository
         env:
           EXPECTED_INDEX_SHA256: ${{ needs.build-pages.outputs.index_sha256 }}
@@ -114,7 +125,9 @@ jobs:
         run: |
           set -euo pipefail
           verification_dir="$(mktemp -d)"
-          for attempt in 1 2 3 4 5 6; do
+          max_attempts=75
+          verified=false
+          for ((attempt = 1; attempt <= max_attempts; attempt++)); do
             if curl --fail --silent --show-error \
                  "$HELM_REPOSITORY_URL/index.yaml" -o "$verification_dir/index.yaml" &&
                curl --fail --silent --show-error \
@@ -124,9 +137,16 @@ jobs:
                test "$(sha256sum "$verification_dir/index.yaml" | awk '{ print $1 }')" = "$EXPECTED_INDEX_SHA256" &&
                test "$(sha256sum "$verification_dir/artifacthub-repo.yml" | awk '{ print $1 }')" = "$EXPECTED_METADATA_SHA256" &&
                test "$(sha256sum "$verification_dir/logo.svg" | awk '{ print $1 }')" = "$EXPECTED_LOGO_SHA256"; then
-              exit 0
+              verified=true
+              break
             fi
-            test "$attempt" -lt 6
+            if (( attempt == max_attempts )); then
+              break
+            fi
+            echo "GitHub Pages still serves stale repository files (attempt $attempt/$max_attempts); retrying in 10 seconds"
             sleep 10
           done
-          exit 1
+          if [[ "$verified" != true ]]; then
+            echo "::error::GitHub Pages did not serve the deployed repository within the verification window"
+            exit 1
+          fi
