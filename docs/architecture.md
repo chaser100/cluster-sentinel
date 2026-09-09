@@ -60,7 +60,7 @@ Modes:
 | `CLUSTERSENTINEL_WATCH_BACKOFF_MAX_SECS` | `60` | Max exponential backoff |
 | `CLUSTERSENTINEL_REGISTRY_CAPACITY` | `10000` | Max retained events |
 | `CLUSTERSENTINEL_DEDUP_TTL_SECS` | `3600` | Registry eviction TTL |
-| `CLUSTERSENTINEL_METRICS_EVENT_LIMIT` | `500` | Max events exported as inventory gauges on `/metrics` |
+| `CLUSTERSENTINEL_METRICS_EVENT_LIMIT` | `500` | Max retained events considered when building inventory gauge series on `/metrics` |
 | `CLUSTERSENTINEL_NAMESPACES` | _(empty=all)_ | Comma-separated namespace filter |
 | `CLUSTERSENTINEL_BUILD_VERSION` | crate version | MCP `serverInfo.version` / health `build_version` |
 | `CLUSTERSENTINEL_GIT_SHA` | `unknown` | health `git_sha` |
@@ -89,7 +89,7 @@ Key series:
 - `clustersentinel_events_registered_total{type,reason,event_namespace,involved_kind,source}`
   (`event_namespace` avoids colliding with Prometheus scrape `namespace`)
 - `clustersentinel_event_last_seen_timestamp{event_namespace,type,reason,involved_object,message,count,source}`
-  (bounded inventory for Grafana tables; `message` truncated to 256 chars; full text via `/api/v1/events` or MCP)
+  (bounded inventory for Grafana tables; identical label sets are merged using the latest timestamp; `message` truncated to 256 chars; full text via `/api/v1/events` or MCP)
 - `clustersentinel_events_deduped_total`
 - `clustersentinel_events_registry_size`
 - `clustersentinel_watch_restarts_total`

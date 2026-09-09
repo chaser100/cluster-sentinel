@@ -390,7 +390,7 @@
       "type": "table",
       "targets": [
         {
-          "expr": "clustersentinel_event_last_seen_timestamp{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_object=~\"($involved_kind)/.*\",source=~\"$source\"}",
+          "expr": "clustersentinel_event_last_seen_timestamp{event_namespace=~\"$event_namespace\",type=~\"$event_type\",reason=~\"$reason\",involved_object=~\"($involved_kind)/.*\",source=~\"$source\"} * 1000",
           "format": "table",
           "instant": true,
           "legendFormat": "",
