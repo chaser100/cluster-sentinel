@@ -3,8 +3,8 @@ apiVersion: v2
 name: clustersentinel
 description: Durable Kubernetes Event collector with Prometheus alerts, a Grafana dashboard, an HTTP API, and an embedded MCP server
 type: application
-version: 0.9.4
-appVersion: "0.9.4"
+version: 0.9.5
+appVersion: "0.9.5"
 kubeVersion: ">=1.23.0-0"
 home: https://github.com/chaser100/cluster-sentinel
 icon: https://chaser100.github.io/cluster-sentinel/logo.svg
@@ -38,12 +38,10 @@ annotations:
       url: https://github.com/chaser100/cluster-sentinel/issues
   artifacthub.io/images: |
     - name: cluster-sentinel
-      image: chaser420/cluster-sentinel:0.9.4
+      image: chaser420/cluster-sentinel:0.9.5
   artifacthub.io/changes: |
     - kind: fixed
-      description: Emit one event inventory sample per Prometheus label set using the latest matching event timestamp.
-    - kind: fixed
-      description: Display recent event timestamps correctly in the Grafana dashboard.
+      description: Return list_recent_events structured results as an object.
 dependencies:
   - name: application
     alias: clustersentinel

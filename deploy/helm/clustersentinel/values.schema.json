@@ -98,7 +98,7 @@
         },
         "imageTag": {
           "$ref": "#/definitions/stringOrNumber",
-          "default": "0.9.4"
+          "default": "0.9.5"
         },
         "imagePullPolicy": {
           "type": "string",

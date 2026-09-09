@@ -659,6 +659,10 @@ async fn mcp_streamable_handshake_tools_and_resources() {
             tool["outputSchema"].is_object(),
             "missing outputSchema: {tool}"
         );
+        assert_eq!(
+            tool["outputSchema"]["type"], "object",
+            "tool outputSchema must use an object root for MCP client compatibility: {tool}"
+        );
         assert_eq!(tool["annotations"]["readOnlyHint"], true);
         assert_eq!(tool["annotations"]["destructiveHint"], false);
         assert_eq!(tool["annotations"]["idempotentHint"], true);
@@ -723,6 +727,16 @@ async fn mcp_streamable_handshake_tools_and_resources() {
             !response["result"]["structuredContent"].is_null(),
             "tool {name} must return structuredContent: {response}"
         );
+        if name == "list_recent_events" {
+            assert!(
+                response["result"]["structuredContent"]["events"].is_array(),
+                "list_recent_events must wrap events in an object: {response}"
+            );
+            assert!(
+                response["result"]["structuredContent"]["returned"].is_number(),
+                "list_recent_events must report the returned event count: {response}"
+            );
+        }
     }
 
     for (id, name, arguments) in [

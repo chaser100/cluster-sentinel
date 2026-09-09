@@ -115,6 +115,8 @@ List registered cluster events (newest `observed_at` first).
 | `reason` | string? | — | exact match |
 | `type_filter` | string? | — | `Normal` / `Warning`; other values return invalid params |
 
+Response: an object containing the `events` array, `returned` count, and `generated_at` timestamp.
+
 ### `search_events`
 
 Rich filter with opaque keyset cursor pagination.

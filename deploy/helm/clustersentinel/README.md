@@ -37,7 +37,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -269,7 +269,7 @@ Gateway API and Prometheus Operator CRDs are not installed by this chart.
 | `prometheusRule.enabled` | `false` | Create the bundled PrometheusRule |
 | `prometheusRule.labels` | `release: kube-prometheus-stack` | Labels used by the Prometheus rule selector |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository |
-| `clustersentinel.imageTag` | `0.9.4` | Container image tag; release tags match the chart version |
+| `clustersentinel.imageTag` | `0.9.5` | Container image tag; release tags match the chart version |
 | `clustersentinel.replicaCount` | `1` | Replica count; keep one replica with the default SQLite database |
 | `clustersentinel.deploymentStrategy.type` | `Recreate` | Prevent concurrent access to the RWO SQLite volume during upgrades |
 | `clustersentinel.persistentVolumeClaims` | `clustersentinel-data`, `5Gi`, `ReadWriteOnce` | Create and mount durable SQLite storage |
@@ -315,9 +315,9 @@ Review values and rendered manifests before an upgrade:
 
 ```bash
 helm repo update
-helm show values cluster-sentinel/clustersentinel --version 0.9.4 > values-0.9.4.yaml
+helm show values cluster-sentinel/clustersentinel --version 0.9.5 > values-0.9.5.yaml
 helm template clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace clustersentinel \
   --values my-values.yaml > rendered.yaml
 ```
@@ -326,7 +326,7 @@ The `0.9.2` upgrade creates the first persistent store for installations coming 
 
 ```bash
 helm upgrade clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace clustersentinel \
   --values my-values.yaml
 ```

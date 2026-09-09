@@ -1,7 +1,7 @@
 # Cluster Sentinel
 
 [![Docker image](https://img.shields.io/docker/v/chaser420/cluster-sentinel?sort=semver&label=Docker%20Hub)](https://hub.docker.com/r/chaser420/cluster-sentinel)
-[![Helm chart](https://img.shields.io/badge/Helm-0.9.4-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
+[![Helm chart](https://img.shields.io/badge/Helm-0.9.5-0f1689)](https://chaser100.github.io/cluster-sentinel/index.yaml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Cluster Sentinel watches Kubernetes Events, persists event history and watch checkpoints in SQLite, and keeps a bounded in-memory read cache. It exposes Prometheus metrics, a read-only HTTP API, and an embedded MCP server for operators and agents.
@@ -53,7 +53,7 @@ See [MCP configuration](docs/mcp.md) for client examples and [architecture](docs
 Release images are published to Docker Hub with the same version as the Helm chart:
 
 ```bash
-docker pull chaser420/cluster-sentinel:0.9.4
+docker pull chaser420/cluster-sentinel:0.9.5
 ```
 
 Run the demo image locally:
@@ -63,7 +63,7 @@ docker run --rm \
   --publish 8080:8080 \
   --env CLUSTERSENTINEL_EVENTS_MODE=demo \
   --env CLUSTERSENTINEL_MCP_AUTH_TOKEN="$(openssl rand -hex 32)" \
-  chaser420/cluster-sentinel:0.9.4
+  chaser420/cluster-sentinel:0.9.5
 ```
 
 ## Helm installation
@@ -75,7 +75,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -86,7 +86,7 @@ Prometheus Operator resources are opt-in because their CRDs are not present in e
 
 ```bash
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.4 \
+  --version 0.9.5 \
   --namespace clustersentinel \
   --create-namespace \
   --set clustersentinel.serviceMonitor.enabled=true \
@@ -136,7 +136,7 @@ echo
 | `clustersentinel.fullnameOverride` | `clustersentinel` | Keeps Deployment, Service, and ServiceAccount names stable. |
 | `clustersentinel.replicaCount` | `1` | Number of application pods. Keep one replica while MCP sessions are stored in memory. |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository. |
-| `clustersentinel.imageTag` | `0.9.4` | Container image version. Release tags, chart versions, and this value must match. |
+| `clustersentinel.imageTag` | `0.9.5` | Container image version. Release tags, chart versions, and this value must match. |
 | `clustersentinel.imagePullPolicy` | `IfNotPresent` | Kubernetes image pull policy. |
 | `clustersentinel.imagePullSecrets` | `[]` | Secret references required by a private container registry. Each item uses the form `name: secret-name`. |
 | `clustersentinel.service.name` | `http` | Service port name used by probes and ServiceMonitor. |
@@ -161,7 +161,7 @@ echo
 | `clustersentinel.envSecrets` | MCP token reference | Maps Secret keys to container environment variables. |
 | `clustersentinel.env` | runtime defaults | Supplies non-secret application environment variables. |
 
-Run `helm show values cluster-sentinel/clustersentinel --version 0.9.4` to view the complete configuration.
+Run `helm show values cluster-sentinel/clustersentinel --version 0.9.5` to view the complete configuration.
 
 ### Persistent event storage
 
