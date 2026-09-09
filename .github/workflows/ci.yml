@@ -58,8 +58,13 @@ jobs:
 
           if [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]] && [[ ! "$BASE_SHA" =~ ^0+$ ]] && git cat-file -e "$BASE_SHA:$CHART_PATH/Chart.yaml" 2>/dev/null; then
             base_version="$(git show "$BASE_SHA:$CHART_PATH/Chart.yaml" | awk '$1 == "version:" { print $2; exit }')"
-            if [[ "$base_version" == "$chart_version" ]]; then
-              echo "::error::Chart version $chart_version already exists on the base revision. Bump it for this change."
+            release_inputs_changed=false
+            if git diff --name-only "$BASE_SHA" "$GITHUB_SHA" | grep -Eq \
+              '^(Cargo\.toml|Cargo\.lock|rust-toolchain\.toml|Dockerfile|\.dockerignore|src/|tests/|observability/|deploy/helm/clustersentinel/)'; then
+              release_inputs_changed=true
+            fi
+            if [[ "$release_inputs_changed" == true && "$base_version" == "$chart_version" ]]; then
+              echo "::error::Application or Helm chart content changed without a chart version bump (current version: $chart_version)."
               exit 1
             fi
           fi
