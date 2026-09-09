@@ -163,6 +163,13 @@ struct HealthOutput {
 }
 
 #[derive(Debug, Serialize, schemars::JsonSchema)]
+struct ListRecentEventsOutput {
+    events: Vec<crate::events::ClusterEvent>,
+    returned: usize,
+    generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, schemars::JsonSchema)]
 struct SearchEventsOutput {
     events: Vec<crate::events::ClusterEvent>,
     matched: usize,
@@ -317,7 +324,7 @@ impl SentinelMcp {
 
     #[tool(
         description = "List recent registered Kubernetes cluster events (newest observed_at first)",
-        output_schema = rmcp::handler::server::tool::schema_for_type::<Vec<crate::events::ClusterEvent>>(),
+        output_schema = rmcp::handler::server::tool::schema_for_type::<ListRecentEventsOutput>(),
         annotations(
             title = "List recent events",
             read_only_hint = true,
@@ -346,11 +353,16 @@ impl SentinelMcp {
                 })
                 .await
                 .map_err(store_err)?;
-            let returned = events.len() as u64;
-            let payload = serde_json::to_value(&events).map_err(|err| {
+            let returned = events.len();
+            let payload = serde_json::to_value(ListRecentEventsOutput {
+                events,
+                returned,
+                generated_at: Utc::now(),
+            })
+            .map_err(|err| {
                 McpError::internal_error(format!("failed to serialize events: {err}"), None)
             })?;
-            Ok((CallToolResult::structured(payload), returned))
+            Ok((CallToolResult::structured(payload), returned as u64))
         })
         .await
     }
