@@ -1,5 +1,6 @@
 //! Prometheus metrics registry for ClusterSentinel.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use prometheus::{
@@ -500,39 +501,77 @@ pub fn event_last_seen_unix(event: &ClusterEvent) -> i64 {
     event.observed_at().timestamp()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct EventInventoryLabels {
+    event_namespace: String,
+    event_type: String,
+    reason: String,
+    involved_object: String,
+    message: String,
+    count: i32,
+    source: String,
+}
+
+impl EventInventoryLabels {
+    fn from_event(event: &ClusterEvent) -> Self {
+        Self {
+            event_namespace: escape_prom_label(label_or_none(&event.namespace)),
+            event_type: escape_prom_label(label_or_none(&event.event_type)),
+            reason: escape_prom_label(label_or_none(&event.reason)),
+            involved_object: escape_prom_label(&involved_object_ref(event)),
+            message: escape_prom_label(&truncate_prom_message(
+                &event.message,
+                EVENT_MESSAGE_LABEL_MAX,
+            )),
+            count: event.count.max(0),
+            source: escape_prom_label(
+                event
+                    .source_component
+                    .as_deref()
+                    .map(label_or_none)
+                    .unwrap_or("_none"),
+            ),
+        }
+    }
+}
+
 /// Render bounded event inventory gauges for Grafana table panels.
 ///
 /// Series cardinality is capped by `limit` (newest-first input expected).
+/// Events with identical exported labels are merged using the latest timestamp.
 /// Full messages remain available via MCP / `/api/v1/events`.
 #[must_use]
 pub fn format_event_inventory_metrics(events: &[ClusterEvent], limit: usize) -> String {
     let limit = limit.clamp(1, 2_000);
     let mut out = String::with_capacity(events.len().min(limit).saturating_mul(256));
     out.push_str(
-        "# HELP clustersentinel_event_last_seen_timestamp Unix timestamp of last observation for a retained cluster event\n",
+        "# HELP clustersentinel_event_last_seen_timestamp Unix timestamp of the latest retained cluster event for each exported label set\n",
     );
     out.push_str("# TYPE clustersentinel_event_last_seen_timestamp gauge\n");
 
+    let mut series = Vec::<(EventInventoryLabels, i64)>::new();
+    let mut series_by_labels = HashMap::<EventInventoryLabels, usize>::new();
     for event in events.iter().take(limit) {
-        let event_namespace = escape_prom_label(label_or_none(&event.namespace));
-        let event_type = escape_prom_label(label_or_none(&event.event_type));
-        let reason = escape_prom_label(label_or_none(&event.reason));
-        let involved_object = escape_prom_label(&involved_object_ref(event));
-        let message = escape_prom_label(&truncate_prom_message(
-            &event.message,
-            EVENT_MESSAGE_LABEL_MAX,
-        ));
-        let count = event.count.max(0);
-        let source = escape_prom_label(
-            event
-                .source_component
-                .as_deref()
-                .map(label_or_none)
-                .unwrap_or("_none"),
-        );
-        let ts = event_last_seen_unix(event);
+        let labels = EventInventoryLabels::from_event(event);
+        let last_seen = event_last_seen_unix(event);
+        if let Some(index) = series_by_labels.get(&labels).copied() {
+            series[index].1 = series[index].1.max(last_seen);
+        } else {
+            series_by_labels.insert(labels.clone(), series.len());
+            series.push((labels, last_seen));
+        }
+    }
+
+    for (labels, last_seen) in series {
         out.push_str(&format!(
-            "clustersentinel_event_last_seen_timestamp{{event_namespace=\"{event_namespace}\",type=\"{event_type}\",reason=\"{reason}\",involved_object=\"{involved_object}\",message=\"{message}\",count=\"{count}\",source=\"{source}\"}} {ts}\n"
+            "clustersentinel_event_last_seen_timestamp{{event_namespace=\"{}\",type=\"{}\",reason=\"{}\",involved_object=\"{}\",message=\"{}\",count=\"{}\",source=\"{}\"}} {last_seen}\n",
+            labels.event_namespace,
+            labels.event_type,
+            labels.reason,
+            labels.involved_object,
+            labels.message,
+            labels.count,
+            labels.source,
         ));
     }
     out
@@ -620,6 +659,51 @@ mod tests {
         assert!(text.contains("reason=\"VolumeFailedDelete\""));
         assert!(text.contains("count=\"3\""));
         assert!(text.contains(&format!("}} {}\n", last_seen.timestamp())));
+    }
+
+    #[test]
+    fn inventory_metrics_merge_identical_label_sets_using_latest_timestamp() {
+        let older = Utc.with_ymd_and_hms(2026, 9, 2, 13, 50, 0).unwrap();
+        let newer = Utc.with_ymd_and_hms(2026, 9, 2, 14, 10, 0).unwrap();
+        let first = ClusterEvent {
+            uid: "event-uid-1".into(),
+            namespace: "prod".into(),
+            name: "event-name-1".into(),
+            resource_version: "100".into(),
+            event_type: "Warning".into(),
+            reason: "UpdateFailed".into(),
+            message: "cannot find secret data".into(),
+            count: 7,
+            involved_object: InvolvedObject {
+                kind: "ExternalSecret".into(),
+                namespace: "prod".into(),
+                name: "mongodb-admin-password".into(),
+                uid: Some("object-uid".into()),
+                api_version: Some("external-secrets.io/v1".into()),
+            },
+            source_component: Some("external-secrets".into()),
+            first_timestamp: Some(older),
+            last_timestamp: Some(older),
+            event_time: None,
+            registered_at: older,
+        };
+        let second = ClusterEvent {
+            uid: "event-uid-2".into(),
+            name: "event-name-2".into(),
+            resource_version: "101".into(),
+            last_timestamp: Some(newer),
+            registered_at: newer,
+            ..first.clone()
+        };
+
+        let text = format_event_inventory_metrics(&[first, second], 10);
+        let samples = text
+            .lines()
+            .filter(|line| line.starts_with("clustersentinel_event_last_seen_timestamp{"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(samples.len(), 1, "duplicate Prometheus series:\n{text}");
+        assert!(samples[0].ends_with(&format!(" {}", newer.timestamp())));
     }
 
     #[test]

@@ -2,6 +2,13 @@
 
 All notable changes are documented in this file. The project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-09-09
+
+### Fixed
+
+- Emit one `clustersentinel_event_last_seen_timestamp` sample per final Prometheus label set and keep the maximum timestamp when distinct Kubernetes Events map to the same series.
+- Convert Unix timestamps from seconds to milliseconds in the Grafana recent-events table so relative event times render correctly.
+
 ## [0.9.3] - 2026-09-08
 
 ### Security
@@ -62,6 +69,7 @@ All notable changes are documented in this file. The project follows [Semantic V
 - JSON Schema for Helm values validation and Artifact Hub configuration display.
 - Kubernetes event RBAC, Prometheus alert rules, Grafana dashboard, and MCP authentication templates.
 
+[0.9.4]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.4
 [0.9.3]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.3
 [0.9.2]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.2
 [0.9.1]: https://github.com/chaser100/cluster-sentinel/releases/tag/v0.9.1

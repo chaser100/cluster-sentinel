@@ -37,7 +37,7 @@ helm repo add cluster-sentinel https://chaser100.github.io/cluster-sentinel
 helm repo update
 
 helm upgrade --install clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --namespace clustersentinel \
   --create-namespace
 ```
@@ -269,7 +269,7 @@ Gateway API and Prometheus Operator CRDs are not installed by this chart.
 | `prometheusRule.enabled` | `false` | Create the bundled PrometheusRule |
 | `prometheusRule.labels` | `release: kube-prometheus-stack` | Labels used by the Prometheus rule selector |
 | `clustersentinel.image` | `chaser420/cluster-sentinel` | Container image repository |
-| `clustersentinel.imageTag` | `0.9.3` | Container image tag; release tags match the chart version |
+| `clustersentinel.imageTag` | `0.9.4` | Container image tag; release tags match the chart version |
 | `clustersentinel.replicaCount` | `1` | Replica count; keep one replica with the default SQLite database |
 | `clustersentinel.deploymentStrategy.type` | `Recreate` | Prevent concurrent access to the RWO SQLite volume during upgrades |
 | `clustersentinel.persistentVolumeClaims` | `clustersentinel-data`, `5Gi`, `ReadWriteOnce` | Create and mount durable SQLite storage |
@@ -293,7 +293,7 @@ Gateway API and Prometheus Operator CRDs are not installed by this chart.
 | `CLUSTERSENTINEL_WATCH_BACKOFF_MAX_SECS` | `60` | Maximum exponential retry delay; must be at least the initial delay |
 | `CLUSTERSENTINEL_REGISTRY_CAPACITY` | `10000` | Maximum deduplicated event objects retained in the in-memory hot cache |
 | `CLUSTERSENTINEL_DEDUP_TTL_SECS` | `3600` | Inactivity period before an event leaves the in-memory cache |
-| `CLUSTERSENTINEL_METRICS_EVENT_LIMIT` | `500` | Maximum events exported as per-event inventory gauges; lower it to reduce Prometheus cardinality |
+| `CLUSTERSENTINEL_METRICS_EVENT_LIMIT` | `500` | Maximum retained events considered when building inventory gauge series; identical exported labels share one series with the latest timestamp |
 | `CLUSTERSENTINEL_NAMESPACES` | all namespaces | Comma-separated namespace allow-list |
 | `CLUSTERSENTINEL_MCP_ALLOWED_HOSTS` | loopback, `clustersentinel`, and Service DNS names | Comma-separated `Host` and `:authority` allow-list for the MCP endpoint |
 | `CLUSTERSENTINEL_MCP_AUTH_TOKEN` | no default | Bearer token required by `/mcp` and `/api/v1/events` |
@@ -315,9 +315,9 @@ Review values and rendered manifests before an upgrade:
 
 ```bash
 helm repo update
-helm show values cluster-sentinel/clustersentinel --version 0.9.3 > values-0.9.3.yaml
+helm show values cluster-sentinel/clustersentinel --version 0.9.4 > values-0.9.4.yaml
 helm template clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --namespace clustersentinel \
   --values my-values.yaml > rendered.yaml
 ```
@@ -326,7 +326,7 @@ The `0.9.2` upgrade creates the first persistent store for installations coming 
 
 ```bash
 helm upgrade clustersentinel cluster-sentinel/clustersentinel \
-  --version 0.9.3 \
+  --version 0.9.4 \
   --namespace clustersentinel \
   --values my-values.yaml
 ```
