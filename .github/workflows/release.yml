@@ -48,8 +48,20 @@ jobs:
           fi
           ci_runs_file="$(mktemp)"
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&head_sha=$GITHUB_SHA&per_page=100" > "$ci_runs_file"
-          if ! jq -e --arg commit "$GITHUB_SHA" 'any(.workflow_runs[]; .head_sha == $commit and .status == "completed" and .conclusion == "success")' "$ci_runs_file"; then
-            echo "::error::Wait for successful push CI on main for this exact commit before tagging"
+          ci_run="$(jq -c --arg commit "$GITHUB_SHA" '[.workflow_runs[] | select(.head_sha == $commit)] | sort_by(.created_at) | last // empty' "$ci_runs_file")"
+          if [[ -z "$ci_run" ]]; then
+            echo "::error::No push CI run exists on main for release commit $GITHUB_SHA"
+            exit 1
+          fi
+          ci_status="$(jq -r '.status' <<< "$ci_run")"
+          ci_conclusion="$(jq -r '.conclusion // "pending"' <<< "$ci_run")"
+          ci_url="$(jq -r '.html_url' <<< "$ci_run")"
+          if [[ "$ci_status" != completed ]]; then
+            echo "::error::Push CI for release commit $GITHUB_SHA is still $ci_status: $ci_url"
+            exit 1
+          fi
+          if [[ "$ci_conclusion" != success ]]; then
+            echo "::error::Push CI for release commit $GITHUB_SHA concluded with $ci_conclusion: $ci_url"
             exit 1
           fi
 
